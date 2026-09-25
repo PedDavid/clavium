@@ -306,9 +306,9 @@ Shipped `PrometheusRule` (Helm-toggleable):
 - alert: ApiKeyExpiringSoon
   expr: |
     (clavium_apikey_deadline_timestamp_seconds - time())
-      < on(namespace, name) clavium_apikey_warn_before_seconds
+      < clavium_apikey_warn_before_seconds
     and (clavium_apikey_deadline_timestamp_seconds - time())
-      >= on(namespace, name) clavium_apikey_critical_before_seconds
+      >= clavium_apikey_critical_before_seconds
   labels: { severity: warning }
   annotations:
     summary: "API key {{ $labels.name }} is due in {{ $value | humanizeDuration }}"
@@ -316,7 +316,7 @@ Shipped `PrometheusRule` (Helm-toggleable):
 - alert: ApiKeyExpiringVerySoon
   expr: |
     (clavium_apikey_deadline_timestamp_seconds - time())
-      < on(namespace, name) clavium_apikey_critical_before_seconds
+      < clavium_apikey_critical_before_seconds
     and (clavium_apikey_deadline_timestamp_seconds - time()) > 0
   labels: { severity: critical }
 - alert: ApiKeyExpired
