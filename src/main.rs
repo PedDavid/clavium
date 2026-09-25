@@ -10,7 +10,8 @@ use clavium::config::Config;
 use clavium::demo;
 use clavium::k8s::KubeRepository;
 use clavium::metrics::Metrics;
-use clavium::providers::{NoProbe, ProbeResult, Prober, StaticProber};
+use clavium::providers::http::HttpProber;
+use clavium::providers::{ProbeResult, Prober, StaticProber};
 use clavium::repo::{MemoryRepository, Repository};
 use clavium::rotation::Rotator;
 use clavium::targets::openbao::OpenBao;
@@ -86,7 +87,7 @@ fn stores(cfg: &Config) -> anyhow::Result<Stores> {
             Arc::new(NoStore)
         }
     };
-    Ok((writer, Arc::new(NoProbe)))
+    Ok((writer, Arc::new(HttpProber::new()?)))
 }
 
 fn init_tracing(json: bool) {
