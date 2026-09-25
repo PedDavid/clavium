@@ -339,6 +339,8 @@ pub struct RotateForm {
 #[template(path = "partials/rotate_result.html")]
 struct RotateResult {
     name: String,
+    /// Step-up auth: the login is too old for this action.
+    reauth: bool,
     error: String,
     outcome: Option<RotateOutcome>,
     consumers: Vec<String>,
@@ -381,10 +383,15 @@ pub async fn rotate(
         .unwrap_or_default();
     let mut result = RotateResult {
         name: name.clone(),
+        reauth: false,
         error: String::new(),
         outcome: None,
         consumers,
     };
+    if !session.fresh_enough(state.inner.cfg.auth.step_up_max_age, Timestamp::now()) {
+        result.reauth = true;
+        return Ok(Html(result.render()?).into_response());
+    }
     let manual_expires_at = match parse_date(&form.expires_at) {
         Ok(d) => d,
         Err(e) => {
