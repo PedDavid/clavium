@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -66,9 +67,19 @@ impl KubeRepository {
             let store = store.clone();
             let ready = ready.clone();
             tokio::spawn(async move {
-                if store.wait_until_ready().await.is_ok() {
-                    info!("ApiKey cache synced");
-                    ready.store(true, Ordering::Relaxed);
+                // Re-poll with a timeout: the store's readiness signal only
+                // wakes the most recent waiter, and the controller waits too.
+                loop {
+                    let wait = store.wait_until_ready();
+                    match tokio::time::timeout(Duration::from_secs(1), wait).await {
+                        Ok(Ok(())) => {
+                            info!("ApiKey cache synced");
+                            ready.store(true, Ordering::Relaxed);
+                            return;
+                        }
+                        Ok(Err(_)) => return,
+                        Err(_) => continue,
+                    }
                 }
             });
         }
@@ -234,7 +245,7 @@ async fn reconcile(key: Arc<ApiKey>, ctx: Arc<Ctx>) -> Result<Action, RepoError>
 }
 
 fn error_policy(_key: Arc<ApiKey>, _error: &RepoError, _ctx: Arc<Ctx>) -> Action {
-    Action::requeue(std::time::Duration::from_secs(30))
+    Action::requeue(Duration::from_secs(30))
 }
 
 #[cfg(test)]
