@@ -74,6 +74,10 @@ spec:
               value: {{ .Values.oidc.adminValue | quote }}
             - name: CLAVIUM_SESSION_TTL
               value: {{ .Values.oidc.sessionTtl | quote }}
+            {{- with .Values.oidc.stepUpMaxAge }}
+            - name: CLAVIUM_STEP_UP_MAX_AGE
+              value: {{ . | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.openbao.addr }}
             - name: CLAVIUM_OPENBAO_ADDR
