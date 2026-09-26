@@ -1,6 +1,5 @@
-//! Pixel screenshots of the `--demo` UI in Chromium, compared with the PNGs in
-//! `tests/screenshots/`. The browser talks to the router in-process (no
-//! socket), with the clock pinned like the HTML snapshots.
+//! Pixel screenshots of the `--demo` UI in Chromium (see `ui/mod.rs`),
+//! compared with the PNGs in `tests/screenshots/`.
 //!
 //! They need Playwright's Chromium, so plain `cargo test` skips them:
 //! `make visual` runs them and `make visual-update` rewrites the baselines.
@@ -9,85 +8,13 @@
 //! workflow, run by hand with "update screenshots" ticked.
 
 mod common;
+mod ui;
 
 use std::path::PathBuf;
 
-use axum::http::header;
-use axum::routing::get;
-use playwright_rs::protocol::{
-    AddStyleTagOptions, BrowserContextOptions, Cookie, Page, Playwright, Viewport,
-};
+use playwright_rs::protocol::Page;
 use playwright_rs::{Animations, ScreenshotAssertionOptions, expect, expect_page};
-
-const ORIGIN: &str = "https://clavium.test";
-
-/// Dialogs and the palette animate in with `@starting-style`; a screenshot
-/// taken during that would catch them half-faded. Served from the app's own
-/// origin because its CSP (`style-src 'self'`) refuses inline styles.
-const NO_MOTION: &str = "*, *::before, *::after, ::backdrop { \
-    transition: none !important; animation: none !important; }";
-const NO_MOTION_PATH: &str = "/__test/no-motion.css";
-
-/// A browser page with the app routed in, holding on to what keeps it alive.
-struct Ui {
-    page: Page,
-    _playwright: Playwright,
-}
-
-async fn open(path: &str, cookies: &[(&str, &str)]) -> Ui {
-    let playwright = Playwright::launch().await.expect("launch Playwright");
-    let browser = playwright
-        .chromium()
-        .launch()
-        .await
-        .expect("launch Chromium (run `make visual-browsers`?)");
-    let context = browser
-        .new_context_with_options(
-            BrowserContextOptions::builder()
-                .viewport(Viewport {
-                    width: 1280,
-                    height: 800,
-                })
-                .device_scale_factor(1.0)
-                .locale("en-US".into())
-                .timezone_id("UTC".into())
-                .reduced_motion("reduce".into())
-                .build(),
-        )
-        .await
-        .unwrap();
-    let cookies: Vec<Cookie> = cookies
-        .iter()
-        .map(|(name, value)| {
-            let mut c = Cookie::new(*name, *value);
-            c.domain = "clavium.test".into();
-            c.path = "/".into();
-            c
-        })
-        .collect();
-    context.add_cookies(&cookies).await.unwrap();
-    let app = common::demo_app().route(
-        NO_MOTION_PATH,
-        get(|| async { ([(header::CONTENT_TYPE, "text/css")], NO_MOTION) }),
-    );
-    context
-        .route_service(&format!("{ORIGIN}/**"), app)
-        .await
-        .unwrap();
-    let page = context.new_page().await.unwrap();
-    page.goto(&format!("{ORIGIN}{path}"), None).await.unwrap();
-    page.add_style_tag(
-        AddStyleTagOptions::builder()
-            .url(format!("{ORIGIN}{NO_MOTION_PATH}"))
-            .build(),
-    )
-    .await
-    .unwrap();
-    Ui {
-        page,
-        _playwright: playwright,
-    }
-}
+use ui::open;
 
 /// Compares the viewport with `tests/screenshots/{name}.png`. A missing
 /// baseline fails rather than being written, unless `UPDATE_SNAPSHOTS` is set;
