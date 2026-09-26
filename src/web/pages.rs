@@ -12,8 +12,8 @@ use jiff::tz::TimeZone;
 use secrecy::SecretString;
 use serde::Deserialize;
 
-use super::auth::{Admin, AuthMode, CsrfForm, Session, User};
-use super::views::{KeyDetail, KeyRow, fmt_date, state_label};
+use super::auth::{Admin, AuthMode, Session, User};
+use super::views::{KeyDetail, KeyRow, fmt_date, safe_link, state_label};
 use super::{AppError, AppState};
 use crate::rotation::{self, ProbeOutcome, RecordError, RotateOutcome, RotateRequest};
 use crate::schedule::State as KeyState;
@@ -463,14 +463,38 @@ pub async fn search(
 
 /// Audits a click on an on-demand key's Create link. Sent by the browser as a
 /// beacon while the link opens the provider's page in a new tab.
-pub async fn opened(
+/// The Create button of an on-demand key: records who opened the
+/// provider's page, then redirects there. Going through the app (instead of
+/// linking to the provider and reporting the click from the browser) means
+/// every way of following the link is audited: without JavaScript, from a
+/// new tab or a copied link. The provider is only reached once the record
+/// is saved.
+pub async fn create(
     State(state): State<AppState>,
     User(session): User,
     headers: HeaderMap,
     Path(name): Path<String>,
-    Form(form): Form<CsrfForm>,
 ) -> Result<Response, AppError> {
-    session.check_csrf(&headers, form.csrf.as_deref())?;
+    // A GET, so SameSite=Lax cookies come along on cross-site navigations:
+    // only follow links from this app, or typed and bookmarked URLs.
+    if let Some(site) = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok())
+        && !matches!(site, "same-origin" | "none")
+    {
+        return Err(AppError::Forbidden(
+            "open the create link from the key's page".into(),
+        ));
+    }
+    let key = state
+        .inner
+        .repo
+        .get(&name)
+        .ok_or_else(|| AppError::NotFound(format!("no API key named {name:?}")))?;
+    let target = key
+        .spec
+        .renew_url
+        .as_deref()
+        .and_then(safe_link)
+        .ok_or_else(|| AppError::BadRequest("this key has no valid create link".into()))?;
     rotation::record_use(
         state.inner.repo.as_ref(),
         &name,
@@ -485,5 +509,5 @@ pub async fn opened(
         rotation::UseError::NotOnDemand(_) => AppError::BadRequest(e.to_string()),
         rotation::UseError::Repo(_) => AppError::Internal(e.to_string()),
     })?;
-    Ok(axum::http::StatusCode::NO_CONTENT.into_response())
+    Ok(Redirect::to(&target).into_response())
 }
