@@ -345,11 +345,17 @@ async fn search_returns_matching_keys_for_the_palette() {
     let html = body(res).await;
     assert!(html.contains(r#"href="/keys/renovate""#));
     assert!(html.contains("Renovate token"));
+    // Listbox options with stable ids, for aria-activedescendant.
+    assert!(
+        html.contains(r#"role="option" id="command-option-1""#),
+        "{html}"
+    );
+    assert!(html.contains(r#"aria-selected="true""#), "{html}");
 
     let res = h
         .app
         .oneshot(Request::get("/search?q=zzz").body(Body::empty()).unwrap())
         .await
         .unwrap();
-    assert!(!body(res).await.contains("menuitem"));
+    assert!(!body(res).await.contains(r#"role="option""#));
 }

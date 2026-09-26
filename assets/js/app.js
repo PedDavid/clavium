@@ -8,23 +8,51 @@
   };
 
   // --- Command palette (⌘K) ---
+  // An ARIA combobox: focus stays in the input, and aria-activedescendant
+  // tells assistive technology which option the arrow keys selected.
   const palette = () => document.getElementById('command-palette');
-  const items = () => Array.from(palette()?.querySelectorAll('[role="menuitem"]') ?? []);
+  const input = () => palette()?.querySelector('input[role="combobox"]');
+  const results = () => document.getElementById('command-results');
+  const items = () => Array.from(results()?.querySelectorAll('[role="option"]') ?? []);
+
+  const setActive = (next) => {
+    items().forEach((el) => {
+      el.classList.toggle('active', el === next);
+      el.setAttribute('aria-selected', el === next ? 'true' : 'false');
+    });
+    const box = input();
+    if (next) {
+      box?.setAttribute('aria-activedescendant', next.id);
+      next.scrollIntoView({ block: 'nearest' });
+    } else {
+      box?.removeAttribute('aria-activedescendant');
+    }
+  };
+
+  // Keeps the combobox state in step with whatever results are shown.
+  const syncResults = () => {
+    const list = items();
+    input()?.setAttribute('aria-expanded', list.length ? 'true' : 'false');
+    setActive(list.find((el) => el.classList.contains('active')) ?? null);
+  };
 
   const openPalette = () => {
     const dialog = palette();
     if (!dialog || dialog.open) return;
+    // Drop the previous results right away: until the new ones arrive,
+    // Enter must not follow a result for a query that is no longer shown.
+    results()?.replaceChildren();
+    syncResults();
     dialog.showModal();
-    const input = dialog.querySelector('input[name="q"]');
-    input.value = '';
-    input.focus();
-    htmx.trigger(input, 'palette-open');
+    const box = input();
+    box.value = '';
+    box.focus();
+    htmx.trigger(box, 'palette-open');
   };
 
-  const setActive = (next) => {
-    items().forEach((el) => el.classList.toggle('active', el === next));
-    next?.scrollIntoView({ block: 'nearest' });
-  };
+  document.addEventListener('htmx:afterSwap', (event) => {
+    if (event.target === results()) syncResults();
+  });
 
   const move = (delta) => {
     const list = items();
@@ -52,7 +80,7 @@
   });
 
   document.addEventListener('mousemove', (event) => {
-    const item = event.target.closest('#command-palette [role="menuitem"]');
+    const item = event.target.closest('#command-palette [role="option"]');
     if (item && !item.classList.contains('active')) setActive(item);
   });
 
