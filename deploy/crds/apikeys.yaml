@@ -66,17 +66,17 @@ spec:
                   criticalBefore:
                     description: Critical alert threshold before the deadline (default from config, 5d).
                     nullable: true
-                    pattern: ^[0-9]+(s|m|h|d|w)$
+                    pattern: ^[0-9]{1,5}(s|m|h|d|w)$
                     type: string
                   maxAge:
                     description: Maximum age before the key must be rotated, e.g. `90d`.
                     nullable: true
-                    pattern: ^[0-9]+(s|m|h|d|w)$
+                    pattern: ^[0-9]{1,5}(s|m|h|d|w)$
                     type: string
                   warnBefore:
                     description: Warning alert threshold before the deadline (default from config, 14d).
                     nullable: true
-                    pattern: ^[0-9]+(s|m|h|d|w)$
+                    pattern: ^[0-9]{1,5}(s|m|h|d|w)$
                     type: string
                 type: object
               setup:
@@ -94,10 +94,11 @@ spec:
               targets:
                 description: Secret stores the key is written to on rotation.
                 items:
-                  description: One storage target. Exactly one field must be set.
+                  description: |-
+                    One storage target. `openbao` is the only kind of target and is
+                    required, so an empty entry is rejected by the API server.
                   properties:
                     openbao:
-                      nullable: true
                       properties:
                         key:
                           description: Key inside the secret, e.g. `token`.
@@ -116,6 +117,8 @@ spec:
                       - mount
                       - path
                       type: object
+                  required:
+                  - openbao
                   type: object
                 type: array
             type: object

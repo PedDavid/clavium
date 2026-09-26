@@ -3,8 +3,17 @@
 
 use jiff::SignedDuration;
 
+/// Most digits a duration may have. Five keeps every value (up to 99999
+/// weeks) far from overflowing a timestamp, and the CRD schema enforces the
+/// same limit through [`PATTERN`], so the API server cannot store a value
+/// the controller would reject.
+pub const MAX_DIGITS: usize = 5;
+
+/// [`parse`]'s grammar as a regex, for the CRD schema.
+pub const PATTERN: &str = r"^[0-9]{1,5}(s|m|h|d|w)$";
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-#[error("invalid duration {0:?}: expected <number><s|m|h|d|w>, e.g. 90d")]
+#[error("invalid duration {0:?}: expected <number><s|m|h|d|w> with at most 5 digits, e.g. 90d")]
 pub struct ParseDurationError(pub String);
 
 pub fn parse(input: &str) -> Result<SignedDuration, ParseDurationError> {
@@ -15,7 +24,8 @@ pub fn parse(input: &str) -> Result<SignedDuration, ParseDurationError> {
         return Err(err());
     }
     let (number, unit) = input_trimmed.split_at(split);
-    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+    if number.is_empty() || number.len() > MAX_DIGITS || !number.bytes().all(|b| b.is_ascii_digit())
+    {
         return Err(err());
     }
     let n: i64 = number.parse().map_err(|_| err())?;
@@ -57,6 +67,19 @@ mod tests {
         assert_eq!(parse("12h").unwrap(), SignedDuration::from_hours(12));
         assert_eq!(parse("5m").unwrap(), SignedDuration::from_mins(5));
         assert_eq!(parse("30s").unwrap(), SignedDuration::from_secs(30));
+        assert_eq!(
+            parse("99999w").unwrap(),
+            SignedDuration::from_hours(99_999 * 7 * 24)
+        );
+    }
+
+    #[test]
+    fn pattern_matches_the_parser() {
+        assert!(PATTERN.contains(&format!("{{1,{MAX_DIGITS}}}")));
+        assert!(PATTERN.ends_with("(s|m|h|d|w)$"));
+        // The largest accepted value still fits a timestamp's range.
+        let max = parse("99999w").unwrap();
+        assert!(jiff::Timestamp::now().checked_add(max).is_ok());
     }
 
     #[test]
@@ -70,6 +93,7 @@ mod tests {
             "10y",
             "1dd",
             "99999999999999999w",
+            "100000s",
             "1é",
         ] {
             assert!(parse(bad).is_err(), "{bad:?} should be rejected");
