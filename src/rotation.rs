@@ -1,7 +1,8 @@
 //! Rotation bookkeeping: recording a rotation by hand, and (with targets)
 //! passing a new key through to the secret stores.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use jiff::Timestamp;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
@@ -149,6 +150,9 @@ pub struct RotateOutcome {
     pub targets: Vec<TargetOutcome>,
     /// Every target was written, and the rotation was recorded.
     pub completed: bool,
+    /// The targets were written, but saving the result in the `ApiKey`
+    /// status failed: the stores hold the new key, the status does not say so.
+    pub status_error: Option<String>,
     /// Probed and manual expiry disagree (the probed one is used).
     pub expiry_mismatch: bool,
 }
@@ -165,8 +169,6 @@ pub enum RotateError {
     InvalidSpec(String),
     #[error(transparent)]
     Probe(#[from] ProbeError),
-    #[error("the key was written, but saving its status failed: {0}")]
-    Status(RepoError),
 }
 
 /// Passes a new key through to an `ApiKey`'s targets and records the result.
@@ -176,6 +178,10 @@ pub struct Rotator {
     prober: Arc<dyn Prober>,
     metrics: Arc<Metrics>,
     allowed: PathAllowList,
+    /// One lock per `ApiKey`: rotations of the same key run one at a time, so
+    /// the order of writes to the stores is the order of the status records.
+    /// Enough for the single replica the app runs as.
+    locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl Rotator {
@@ -192,6 +198,7 @@ impl Rotator {
             prober,
             metrics,
             allowed,
+            locks: Mutex::default(),
         }
     }
 
@@ -200,9 +207,20 @@ impl Rotator {
         name: &str,
         req: RotateRequest,
     ) -> Result<RotateOutcome, RotateError> {
-        let result = self.rotate_inner(name, &req).await;
+        let lock = self
+            .locks
+            .lock()
+            .unwrap()
+            .entry(name.to_string())
+            .or_default()
+            .clone();
+        let result = {
+            let _guard = lock.lock().await;
+            self.rotate_inner(name, &req).await
+        };
         let label = match &result {
             Ok(o) if o.completed => "ok",
+            Ok(o) if o.status_error.is_some() => "unrecorded",
             Ok(o) if o.targets.iter().all(|t| t.error.is_some()) => "failed",
             Ok(_) => "partial",
             Err(_) => "rejected",
@@ -304,9 +322,18 @@ impl Rotator {
                 // Drop entries for targets no longer in the spec.
                 status.targets.retain(|t| spec_refs.contains(&t.reference));
                 for outcome in &targets {
+                    // A failed attempt keeps the time of the last successful write.
+                    let last_written = match &outcome.error {
+                        None => Some(Time(now)),
+                        Some(_) => status
+                            .targets
+                            .iter()
+                            .find(|t| t.reference == outcome.reference)
+                            .and_then(|t| t.last_written.clone()),
+                    };
                     let entry = TargetStatus {
                         reference: outcome.reference.clone(),
-                        last_written: Some(Time(now)),
+                        last_written,
                         result: if outcome.error.is_none() {
                             TargetResult::Ok
                         } else {
@@ -334,8 +361,41 @@ impl Rotator {
                     );
                 }
             })
-            .await
-            .map_err(RotateError::Status)?;
+            .await;
+        let updated = match updated {
+            Ok(updated) => updated,
+            Err(e) => {
+                // The stores already hold the new key; say so, instead of
+                // reporting the rotation as not done.
+                let written: Vec<&str> = targets
+                    .iter()
+                    .filter(|t| t.error.is_none())
+                    .map(|t| t.reference.as_str())
+                    .collect();
+                warn!(key = name, actor = %req.actor.sub, error = %e, written = ?written, "targets written but status update failed");
+                self.repo
+                    .record_event(
+                        &key,
+                        AuditEvent {
+                            reason: "RotationUnrecorded",
+                            note: format!(
+                                "{} wrote the key to {}, but saving the status failed: {e}",
+                                req.actor,
+                                written.join(", ")
+                            ),
+                            warning: true,
+                        },
+                    )
+                    .await;
+                return Ok(RotateOutcome {
+                    probe,
+                    targets,
+                    completed: false,
+                    status_error: Some(e.to_string()),
+                    expiry_mismatch,
+                });
+            }
+        };
 
         let failed: Vec<&str> = targets
             .iter()
@@ -379,6 +439,7 @@ impl Rotator {
             probe,
             targets,
             completed,
+            status_error: None,
             expiry_mismatch,
         })
     }
@@ -462,6 +523,163 @@ mod tests {
         assert!(status.targets.iter().all(|t| t.result == TargetResult::Ok));
         assert_eq!(status.history[0].kind, HistoryKind::Rotated);
         assert_eq!(f.repo.events()[0].1.reason, "Rotated");
+    }
+
+    /// Logs every write as (target, value); writing `slow` pauses after the
+    /// value is stored, like a slow response from the store.
+    #[derive(Default)]
+    struct LoggingWriter {
+        log: Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl TargetWriter for LoggingWriter {
+        async fn write(
+            &self,
+            target: &TargetSpec,
+            value: &SecretString,
+        ) -> Result<(), crate::targets::TargetError> {
+            let value = value.expose_secret().to_string();
+            let slow = value == "slow";
+            self.log.lock().unwrap().push((target.reference(), value));
+            if slow {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_rotations_of_a_key_are_serialized() {
+        let repo = Arc::new(MemoryRepository::new([ApiKey::new(
+            "k",
+            ApiKeySpec {
+                targets: vec![target("a"), target("b")],
+                ..Default::default()
+            },
+        )]));
+        let writer = Arc::new(LoggingWriter::default());
+        let dyn_repo: Arc<dyn Repository> = repo.clone();
+        let metrics = Metrics::new(dyn_repo.clone(), Thresholds::default());
+        let rotator = Arc::new(Rotator::new(
+            dyn_repo,
+            writer.clone(),
+            Arc::new(NoProbe),
+            metrics,
+            PathAllowList::allow_all(),
+        ));
+        let submit = |value: &str, who: &str| {
+            let rotator = rotator.clone();
+            let req = RotateRequest {
+                actor: Actor::new(who, who),
+                ..request(value)
+            };
+            tokio::spawn(async move { rotator.rotate("k", req).await.unwrap() })
+        };
+        // The slow rotation starts first and is still writing when the fast
+        // one arrives.
+        let first = submit("slow", "slow");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let second = submit("fast", "fast");
+        assert!(first.await.unwrap().completed);
+        assert!(second.await.unwrap().completed);
+
+        // Every target ends with the value of the rotation recorded last.
+        let status = repo.get("k").unwrap().status.clone().unwrap();
+        let recorded_last = status.history[0].by.sub.clone();
+        let log = writer.log.lock().unwrap().clone();
+        for reference in ["openbao/secret/a#token", "openbao/secret/b#token"] {
+            let last = log.iter().rev().find(|(r, _)| r == reference).unwrap();
+            assert_eq!(last.1, recorded_last, "{reference}: {log:?}");
+        }
+        // And the writes did not interleave.
+        let values: Vec<&str> = log.iter().map(|(_, v)| v.as_str()).collect();
+        assert_eq!(values, ["slow", "slow", "fast", "fast"]);
+    }
+
+    /// Reads from a [`MemoryRepository`], fails every status update.
+    struct BrokenStatus(MemoryRepository);
+
+    #[async_trait::async_trait]
+    impl Repository for BrokenStatus {
+        fn list(&self) -> Vec<Arc<ApiKey>> {
+            self.0.list()
+        }
+        fn get(&self, name: &str) -> Option<Arc<ApiKey>> {
+            self.0.get(name)
+        }
+        async fn update_status(
+            &self,
+            _: &str,
+            _: crate::repo::StatusMutation<'_>,
+        ) -> Result<ApiKey, RepoError> {
+            Err(RepoError::Conflict)
+        }
+        async fn record_event(&self, key: &ApiKey, event: AuditEvent) {
+            self.0.record_event(key, event).await
+        }
+        fn ready(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn written_but_unrecorded_is_reported_as_such() {
+        let repo = Arc::new(BrokenStatus(MemoryRepository::new([ApiKey::new(
+            "k",
+            ApiKeySpec {
+                targets: vec![target("a"), target("b")],
+                ..Default::default()
+            },
+        )])));
+        let writer = Arc::new(MemoryWriter::default());
+        let dyn_repo: Arc<dyn Repository> = repo.clone();
+        let metrics = Metrics::new(dyn_repo.clone(), Thresholds::default());
+        let rotator = Rotator::new(
+            dyn_repo,
+            writer.clone(),
+            Arc::new(NoProbe),
+            metrics.clone(),
+            PathAllowList::allow_all(),
+        );
+        let outcome = rotator.rotate("k", request("new-key")).await.unwrap();
+        assert!(!outcome.completed);
+        assert!(outcome.targets.iter().all(|t| t.error.is_none()));
+        assert!(outcome.status_error.unwrap().contains("conflicting"));
+        assert_eq!(writer.writes().len(), 2);
+        let events = repo.0.events();
+        assert_eq!(events[0].1.reason, "RotationUnrecorded");
+        assert!(events[0].1.warning);
+        assert!(
+            metrics
+                .encode()
+                .contains(r#"clavium_rotations_total{result="unrecorded"} 1"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_write_keeps_the_last_successful_write_time() {
+        let f = fixture(Provider::Generic, Arc::new(NoProbe));
+        f.rotator.rotate("k", request("one")).await.unwrap();
+        let first = f.repo.get("k").unwrap().status.clone().unwrap().targets;
+        f.writer
+            .fail("openbao/secret/b#token", "OpenBao returned 503: sealed");
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        f.rotator.rotate("k", request("two")).await.unwrap();
+        let second = f.repo.get("k").unwrap().status.clone().unwrap().targets;
+        let find =
+            |ts: &[TargetStatus], r: &str| ts.iter().find(|t| t.reference == r).cloned().unwrap();
+        let (a1, a2) = (
+            find(&first, "openbao/secret/a#token"),
+            find(&second, "openbao/secret/a#token"),
+        );
+        let (b1, b2) = (
+            find(&first, "openbao/secret/b#token"),
+            find(&second, "openbao/secret/b#token"),
+        );
+        assert!(a2.last_written > a1.last_written);
+        assert_eq!(b2.result, TargetResult::Failed);
+        assert_eq!(b2.last_written, b1.last_written);
     }
 
     #[tokio::test]
