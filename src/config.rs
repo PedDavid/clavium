@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use jiff::SignedDuration;
 use url::Url;
 
@@ -158,6 +158,30 @@ fn parse_duration(s: &str) -> Result<SignedDuration, String> {
 }
 
 impl Config {
+    /// Parses flags and environment, and exits with a usage error when they
+    /// are inconsistent.
+    pub fn load() -> Config {
+        let cfg = Config::parse();
+        if let Err(e) = cfg.check() {
+            Config::command()
+                .error(clap::error::ErrorKind::ArgumentConflict, e)
+                .exit();
+        }
+        cfg
+    }
+
+    /// Checks between flags that clap cannot express.
+    pub fn check(&self) -> Result<(), String> {
+        if self.critical_before > self.warn_before {
+            return Err(format!(
+                "--critical-before ({}) must not be longer than --warn-before ({}), or keys would never be in the warning state",
+                duration::humanize(self.critical_before),
+                duration::humanize(self.warn_before),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn thresholds(&self) -> Thresholds {
         Thresholds {
             warn_before: self.warn_before,
@@ -200,6 +224,7 @@ mod tests {
     fn defaults_parse() {
         let cfg = Config::try_parse_from(["clavium"]).unwrap();
         assert_eq!(cfg.thresholds(), Thresholds::default());
+        assert!(cfg.check().is_ok());
         assert!(cfg.allowed_paths().allows("secret/data/x"));
         assert_eq!(cfg.public_origin(), "http://localhost:8080");
         assert_eq!(cfg.url_for("/keys/a"), "http://localhost:8080/keys/a");
@@ -216,5 +241,23 @@ mod tests {
         let allowed = cfg.allowed_paths();
         assert!(allowed.allows("kv/data/home/api/x"));
         assert!(!allowed.allows("secret/data/other"));
+    }
+
+    #[test]
+    fn critical_threshold_must_not_exceed_warning() {
+        let parse = |warn: &str, critical: &str| {
+            Config::try_parse_from([
+                "clavium",
+                "--warn-before",
+                warn,
+                "--critical-before",
+                critical,
+            ])
+            .unwrap()
+        };
+        let err = parse("5d", "14d").check().unwrap_err();
+        assert!(err.contains("--critical-before (14d)"), "{err}");
+        assert!(parse("14d", "14d").check().is_ok());
+        assert!(parse("14d", "5d").check().is_ok());
     }
 }
