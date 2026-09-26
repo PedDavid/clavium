@@ -48,6 +48,8 @@ pub enum RecordError {
     FutureDate,
     #[error("the expiry date is before the rotation date")]
     ExpiryBeforeRotation,
+    #[error("the key was already rotated at {0}; an earlier rotation would not change anything")]
+    OlderThanCurrent(Timestamp),
     #[error(transparent)]
     Repo(#[from] RepoError),
 }
@@ -69,8 +71,19 @@ pub async fn record(
     {
         return Err(RecordError::ExpiryBeforeRotation);
     }
+    // A backdated entry must not replace a newer rotation's dates and probe
+    // state, nor break the newest-first order of the history. The check runs
+    // on the fresh status inside the update, so a concurrent newer rotation
+    // is seen too.
+    let newer = std::sync::Mutex::new(None);
     let updated = repo
         .update_status(name, &|status| {
+            if let Some(Time(last)) = status.last_rotated
+                && last > rotated_at
+            {
+                *newer.lock().unwrap() = Some(last);
+                return;
+            }
             apply_rotation(
                 status,
                 rotated_at,
@@ -81,6 +94,9 @@ pub async fn record(
             )
         })
         .await?;
+    if let Some(last) = newer.into_inner().unwrap() {
+        return Err(RecordError::OlderThanCurrent(last));
+    }
     let expiry = expires_at.map_or_else(|| "no expiry".to_string(), |e| format!("expires {e}"));
     repo.record_event(
         &updated,
@@ -131,6 +147,35 @@ mod tests {
         assert_eq!(status.history[0].by, "bob");
         assert_eq!(repo.events().len(), 13);
         assert_eq!(repo.events()[12].1.reason, "Recorded");
+    }
+
+    #[tokio::test]
+    async fn backdated_record_keeps_the_newer_rotation() {
+        let repo = MemoryRepository::new([ApiKey::new("k", ApiKeySpec::default())]);
+        let now = ts("2026-09-25T12:00:00Z");
+        record(
+            &repo,
+            "k",
+            "alice",
+            ts("2026-09-20T00:00:00Z"),
+            Some(ts("2026-12-01T00:00:00Z")),
+            now,
+        )
+        .await
+        .unwrap();
+        let err = record(&repo, "k", "bob", ts("2026-09-10T00:00:00Z"), None, now).await;
+        assert!(
+            matches!(err, Err(RecordError::OlderThanCurrent(t)) if t == ts("2026-09-20T00:00:00Z"))
+        );
+        let status = repo.get("k").unwrap().status.clone().unwrap();
+        assert_eq!(status.last_rotated, Some(Time(ts("2026-09-20T00:00:00Z"))));
+        assert_eq!(status.expires_at, Some(Time(ts("2026-12-01T00:00:00Z"))));
+        assert_eq!(status.history.len(), 1);
+        assert_eq!(repo.events().len(), 1);
+        // The same date again is fine, e.g. to correct the expiry.
+        record(&repo, "k", "bob", ts("2026-09-20T00:00:00Z"), None, now)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
