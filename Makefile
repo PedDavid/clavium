@@ -16,8 +16,8 @@ check: ## What CI runs
 	cargo clippy --all-targets --locked -- -D warnings
 	cargo test --locked
 
-visual: ## Screenshot tests in Chromium against tests/screenshots/
-	cargo test --locked --test visual -- --ignored
+visual: ## Browser tests: the palette, and screenshots against tests/screenshots/
+	cargo test --locked --test palette --test visual -- --ignored
 
 visual-update: ## Rewrite tests/screenshots/ (keep only images rendered on CI)
 	UPDATE_SNAPSHOTS=1 cargo test --locked --test visual -- --ignored
