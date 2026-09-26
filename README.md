@@ -84,6 +84,13 @@ The chart installs the CRD, a single-replica Deployment and a Role that can read
 The chart also mounts a ServiceAccount token with audience `openbao` for
 OpenBao's Kubernetes auth.
 
+- **Image.** It defaults to the chart's `appVersion`. The release workflow
+  publishes that tag the first time a new `appVersion` reaches `main`, and
+  `v<appVersion>` tags must match it.
+- **Services.** `service.type` applies to the UI only. Metrics and health
+  checks are unauthenticated, so they always get a separate ClusterIP Service
+  (`<release>-clavium-metrics`), which the ServiceMonitor selects.
+
 OIDC: register a confidential client with redirect URI
 `<publicUrl>/auth/callback`. Admins are users whose ID token claim `groups`
 contains `clavium-admins` (see `oidc.adminClaim` / `oidc.adminValue`;
@@ -162,7 +169,7 @@ metrics carry the labels `namespace`, `name`, `provider` and `owner`.
 | `clavium_apikey_state_known` | 0 when there is no deadline at all |
 | `clavium_apikey_target_healthy{target}` | Result of the last write per target |
 | `clavium_apikey_info{display_name, renew_url}` | Metadata for joins |
-| `clavium_rotations_total{result}` | ok, partial, failed, rejected, recorded |
+| `clavium_rotations_total{result}` | ok, partial, failed, unrecorded (written, status not saved), rejected, recorded |
 | `clavium_probe_requests_total{provider,result}` | |
 
 The alert rules are in
