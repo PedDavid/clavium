@@ -47,6 +47,8 @@ openbao:
 insecureDevAuth: false
 
 service:
+  # Applies to the UI only. Metrics and health checks always get a separate
+  # ClusterIP Service (<fullname>-metrics).
   type: ClusterIP
   port: 80
 

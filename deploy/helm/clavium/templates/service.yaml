@@ -13,6 +13,3 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
-    - name: metrics
-      port: 9090
-      targetPort: metrics

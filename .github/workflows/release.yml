@@ -20,6 +20,25 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The chart's default image tag is its appVersion, so that tag must
+      # exist as soon as the chart is on main: publish it the first time a
+      # new appVersion is seen (a version bump), never overwrite it from
+      # main afterwards, and require release tags to match it.
+      - id: version
+        run: |
+          app=$(yq '.appVersion' deploy/helm/clavium/Chart.yaml)
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if [[ $GITHUB_REF == refs/tags/v* && ${GITHUB_REF#refs/tags/v} != "$app" ]]; then
+            echo "::error::tag ${GITHUB_REF#refs/tags/} does not match the chart appVersion $app"
+            exit 1
+          fi
+          if docker buildx imagetools inspect "$image:$app" >/dev/null 2>&1; then
+            echo "first=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "first=true" >> "$GITHUB_OUTPUT"
+          fi
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -29,6 +48,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=raw,value=main,enable={{is_default_branch}}
+            type=raw,value=${{ steps.version.outputs.app }},enable=${{ steps.version.outputs.first == 'true' && github.ref_type == 'branch' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -37,3 +57,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: The chart's default image exists
+        run: docker buildx imagetools inspect "${{ steps.version.outputs.image }}:${{ steps.version.outputs.app }}"

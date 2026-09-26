@@ -23,3 +23,4 @@ helm-lint: ## Lint and render the chart
 	helm lint deploy/helm/clavium --set oidc.issuer=https://idp.example.com
 	helm template clavium deploy/helm/clavium --set oidc.issuer=https://idp.example.com \
 	  --set openbao.addr=https://bao:8200 --set prometheusRule.enabled=true --set serviceMonitor.enabled=true >/dev/null
+	deploy/helm/tests/render.sh
