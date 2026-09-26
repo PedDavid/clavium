@@ -12,7 +12,7 @@ pub const GROUP: &str = "clavium.prdv.cloud";
 pub const VERSION: &str = "v1alpha1";
 
 /// Pattern accepted by [`crate::duration::parse`], e.g. `90d`, `2w`, `12h`.
-const DURATION_PATTERN: &str = r"^[0-9]+(s|m|h|d|w)$";
+const DURATION_PATTERN: &str = crate::duration::PATTERN;
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, Default, PartialEq, JsonSchema)]
 #[kube(
@@ -112,12 +112,12 @@ pub struct RotationPolicy {
     pub critical_before: Option<String>,
 }
 
-/// One storage target. Exactly one field must be set.
+/// One storage target. `openbao` is the only kind of target and is
+/// required, so an empty entry is rejected by the API server.
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub openbao: Option<OpenBaoTarget>,
+    pub openbao: OpenBaoTarget,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq, Eq, JsonSchema)]
@@ -157,10 +157,7 @@ impl OpenBaoTarget {
 
 impl TargetSpec {
     pub fn reference(&self) -> String {
-        match &self.openbao {
-            Some(t) => t.reference(),
-            None => "invalid-target".to_string(),
-        }
+        self.openbao.reference()
     }
 }
 
@@ -296,7 +293,7 @@ spec:
         let key: ApiKey = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(key.spec.provider, Provider::Github);
         assert_eq!(key.display_name(), "renovate-github");
-        let target = key.spec.targets[0].openbao.as_ref().unwrap();
+        let target = &key.spec.targets[0].openbao;
         assert_eq!(target.reference(), "openbao/secret/ci/renovate#token");
         assert_eq!(target.policy_path(), "secret/data/ci/renovate");
     }
@@ -309,5 +306,41 @@ spec:
         .unwrap();
         assert_eq!(key.spec.provider, Provider::Generic);
         assert!(key.spec.targets.is_empty());
+    }
+
+    #[test]
+    fn empty_target_is_rejected() {
+        let err = serde_yaml::from_str::<ApiKeySpec>("targets: [{}]\n").unwrap_err();
+        assert!(err.to_string().contains("missing field `openbao`"), "{err}");
+    }
+
+    /// The generated schema, as the API server uses it for admission.
+    fn spec_schema() -> serde_json::Value {
+        use kube::CustomResourceExt;
+        let crd = serde_json::to_value(ApiKey::crd()).unwrap();
+        crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"].clone()
+    }
+
+    #[test]
+    fn schema_requires_a_target_kind() {
+        let target = &spec_schema()["properties"]["targets"]["items"];
+        assert_eq!(target["required"], serde_json::json!(["openbao"]));
+        let openbao = &target["properties"]["openbao"];
+        assert_eq!(
+            openbao["required"],
+            serde_json::json!(["key", "mount", "path"])
+        );
+    }
+
+    #[test]
+    fn schema_durations_use_the_parser_pattern() {
+        let rotation = &spec_schema()["properties"]["rotation"]["properties"];
+        for field in ["maxAge", "warnBefore", "criticalBefore"] {
+            assert_eq!(
+                rotation[field]["pattern"],
+                crate::duration::PATTERN,
+                "{field}"
+            );
+        }
     }
 }
