@@ -153,12 +153,15 @@ spec:
 
 - **No deadline, no alerts.** These keys show as *On demand* and only export
   `clavium_apikey_info` and `clavium_apikey_last_used_timestamp_seconds`.
-- **Create instead of Renew or Rotate.** Clicking **Create** opens the
-  provider's page. It also records who opened it and when, in the key's
-  status, its history and a Kubernetes Event. The app cannot see whether a
-  token was actually created.
-- **Validation.** `targets` and `rotation.maxAge` are rejected by the `Valid`
-  condition, since both contradict "never stored".
+- **Create instead of Renew or Rotate.** **Create** links to
+  `/keys/<name>/create`. That link records who opened the provider's page
+  and when, in the key's status, its history and a Kubernetes Event, and only
+  then redirects to the provider. This works without JavaScript, from a new
+  tab or from a copied link. Cross-site navigations are refused. The app
+  cannot see whether a token was actually created.
+- **Server-side rules.** Recording or rotating an on-demand key is refused.
+  `targets` and every `rotation` field are rejected by the `Valid` condition,
+  since they contradict "never stored".
 
 ## Security model
 

@@ -61,7 +61,7 @@
         <td class="text-end">
           {% if let Some(url) = row.renew_url %}
           {% if row.on_demand %}
-          <a class="btn" data-variant="ghost" data-size="sm" href="{{ url }}" target="_blank" rel="noopener noreferrer" data-track-open="/keys/{{ row.name }}/opened" title="Opening the create page is recorded">
+          <a class="btn" data-variant="ghost" data-size="sm" href="/keys/{{ row.name }}/create" target="_blank" rel="noopener" title="Opens {{ url }}; who opened it is recorded">
             Create {% include "icons/external-link.svg" %}
           </a>
           {% else %}
