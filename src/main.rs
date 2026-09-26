@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum_extra::extract::cookie::Key;
 use base64::Engine as _;
-use clap::Parser;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -17,7 +16,7 @@ use clavium::web::{self, AppState};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cfg = Config::parse();
+    let cfg = Config::load();
     init_tracing(cfg.log_json);
 
     let repo: Arc<dyn Repository> = if cfg.demo {
