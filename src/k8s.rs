@@ -11,13 +11,12 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use jiff::Timestamp;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{Condition, Time};
-use kube::api::{Patch, PatchParams, PostParams};
+use kube::api::PostParams;
 use kube::runtime::controller::{Action, Controller};
 use kube::runtime::events::{Event, EventType, Recorder, Reporter};
 use kube::runtime::reflector::{ObjectRef, Store};
 use kube::runtime::watcher;
 use kube::{Api, Client, Resource};
-use serde_json::json;
 use tracing::{debug, info, warn};
 
 use crate::crd::ApiKey;
@@ -104,30 +103,12 @@ impl Repository for KubeRepository {
         name: &str,
         mutate: StatusMutation<'_>,
     ) -> Result<ApiKey, RepoError> {
-        for _ in 0..MAX_STATUS_ATTEMPTS {
-            // A fresh read carries the resourceVersion, so a concurrent
-            // write makes the replace fail with 409 instead of being lost.
-            let mut obj = match self.api.get_status(name).await {
-                Ok(obj) => obj,
-                Err(kube::Error::Api(s)) if s.is_not_found() => {
-                    return Err(RepoError::NotFound(name.to_string()));
-                }
-                Err(e) => return Err(e.into()),
-            };
-            let mut status = obj.status.take().unwrap_or_default();
-            mutate(&mut status);
-            obj.status = Some(status);
-            match self
-                .api
-                .replace_status(name, &PostParams::default(), &obj)
-                .await
-            {
-                Ok(updated) => return Ok(updated),
-                Err(kube::Error::Api(s)) if s.is_conflict() => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Err(RepoError::Conflict)
+        let updated = replace_status_with(&self.api, name, &|obj| {
+            mutate(obj.status.get_or_insert_with(Default::default));
+            true
+        })
+        .await?;
+        Ok(updated.expect("the mutation always writes"))
     }
 
     async fn record_event(&self, key: &ApiKey, event: AuditEvent) {
@@ -150,6 +131,57 @@ impl Repository for KubeRepository {
     fn ready(&self) -> bool {
         self.ready.load(Ordering::Relaxed)
     }
+}
+
+type ObjectMutation<'a> = &'a (dyn Fn(&mut ApiKey) -> bool + Send + Sync);
+
+/// Reads `name` fresh, applies `mutate` and writes the status back. The read
+/// carries the resourceVersion, so a concurrent write makes the replace fail
+/// with 409 instead of being lost; the whole cycle is then retried. Returns
+/// `None` without writing if `mutate` returns false.
+async fn replace_status_with(
+    api: &Api<ApiKey>,
+    name: &str,
+    mutate: ObjectMutation<'_>,
+) -> Result<Option<ApiKey>, RepoError> {
+    for _ in 0..MAX_STATUS_ATTEMPTS {
+        let mut obj = match api.get_status(name).await {
+            Ok(obj) => obj,
+            Err(kube::Error::Api(s)) if s.is_not_found() => {
+                return Err(RepoError::NotFound(name.to_string()));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        if !mutate(&mut obj) {
+            return Ok(None);
+        }
+        match api.replace_status(name, &PostParams::default(), &obj).await {
+            Ok(updated) => return Ok(Some(updated)),
+            Err(kube::Error::Api(s)) if s.is_conflict() => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(RepoError::Conflict)
+}
+
+/// Brings the `Valid` condition of `obj` up to date, keeping every other
+/// condition as it is. Returns false if there was nothing to change.
+pub fn update_valid_condition(obj: &mut ApiKey, allowed: &PathAllowList, now: Timestamp) -> bool {
+    let Some(condition) = desired_valid_condition(obj, allowed, now) else {
+        return false;
+    };
+    let generation = obj.metadata.generation;
+    let status = obj.status.get_or_insert_with(Default::default);
+    match status
+        .conditions
+        .iter_mut()
+        .find(|c| c.type_ == VALID_CONDITION)
+    {
+        Some(existing) => *existing = condition,
+        None => status.conditions.push(condition),
+    }
+    status.observed_generation = generation;
+    true
 }
 
 /// Desired `Valid` condition for `key`, or `None` if the current one is up to date.
@@ -187,35 +219,21 @@ pub fn desired_valid_condition(
     })
 }
 
-async fn reconcile(key: Arc<ApiKey>, ctx: Arc<Ctx>) -> Result<Action, kube::Error> {
-    let Some(condition) = desired_valid_condition(&key, &ctx.allowed, Timestamp::now()) else {
+async fn reconcile(key: Arc<ApiKey>, ctx: Arc<Ctx>) -> Result<Action, RepoError> {
+    // Cheap check against the cached copy first; the write itself works on a
+    // fresh read, so conditions written by others since are kept.
+    if desired_valid_condition(&key, &ctx.allowed, Timestamp::now()).is_none() {
         return Ok(Action::await_change());
-    };
-    let mut conditions: Vec<Condition> = key
-        .status
-        .as_ref()
-        .map(|s| {
-            s.conditions
-                .iter()
-                .filter(|c| c.type_ != VALID_CONDITION)
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
-    conditions.push(condition);
-    let patch = json!({
-        "status": {
-            "conditions": conditions,
-            "observedGeneration": key.metadata.generation,
-        }
-    });
-    ctx.api
-        .patch_status(key.name(), &PatchParams::default(), &Patch::Merge(&patch))
-        .await?;
+    }
+    let allowed = &ctx.allowed;
+    replace_status_with(&ctx.api, key.name(), &|obj| {
+        update_valid_condition(obj, allowed, Timestamp::now())
+    })
+    .await?;
     Ok(Action::await_change())
 }
 
-fn error_policy(_key: Arc<ApiKey>, _error: &kube::Error, _ctx: Arc<Ctx>) -> Action {
+fn error_policy(_key: Arc<ApiKey>, _error: &RepoError, _ctx: Arc<Ctx>) -> Action {
     Action::requeue(std::time::Duration::from_secs(30))
 }
 
@@ -247,5 +265,43 @@ mod tests {
         assert_eq!(second.status, "False");
         assert_eq!(second.reason, "InvalidSpec");
         assert_eq!(second.last_transition_time, Time(later));
+    }
+
+    #[test]
+    fn valid_condition_update_keeps_other_conditions() {
+        let now: Timestamp = "2026-09-01T00:00:00Z".parse().unwrap();
+        let allowed = PathAllowList::allow_all();
+        // The fresh object carries a condition written by someone else after
+        // the cached copy was taken.
+        let other = Condition {
+            type_: "Ready".into(),
+            status: "True".into(),
+            reason: "External".into(),
+            message: "set by another controller".into(),
+            observed_generation: Some(1),
+            last_transition_time: Time(now),
+        };
+        let mut fresh = ApiKey::new("k", ApiKeySpec::default());
+        fresh.metadata.generation = Some(1);
+        fresh.status = Some(ApiKeyStatus {
+            conditions: vec![other.clone()],
+            ..Default::default()
+        });
+        assert!(update_valid_condition(&mut fresh, &allowed, now));
+        let status = fresh.status.clone().unwrap();
+        assert_eq!(status.conditions.len(), 2);
+        assert_eq!(status.conditions[0], other);
+        assert_eq!(status.conditions[1].type_, VALID_CONDITION);
+        assert_eq!(status.observed_generation, Some(1));
+        // Up to date: nothing to write.
+        assert!(!update_valid_condition(&mut fresh, &allowed, now));
+        // A spec change replaces Valid in place, still keeping the other one.
+        fresh.spec.rotation.max_age = Some("nope".into());
+        fresh.metadata.generation = Some(2);
+        assert!(update_valid_condition(&mut fresh, &allowed, now));
+        let status = fresh.status.unwrap();
+        assert_eq!(status.conditions.len(), 2);
+        assert_eq!(status.conditions[0], other);
+        assert_eq!(status.conditions[1].status, "False");
     }
 }
