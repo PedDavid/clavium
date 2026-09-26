@@ -25,9 +25,9 @@
     <div class="flex flex-wrap gap-2">
       {% if let Some(url) = key.row.renew_url %}
       {% if key.row.on_demand %}
-      <a class="btn"  href="{{ url }}" target="_blank" rel="noopener noreferrer" data-track-open="/keys/{{ key.row.name }}/opened" title="Opening the create page is recorded">
-            Create {% include "icons/external-link.svg" %}
-          </a>
+      <a class="btn" href="/keys/{{ key.row.name }}/create" target="_blank" rel="noopener" title="Opens {{ url }}; who opened it is recorded">
+        Create {% include "icons/external-link.svg" %}
+      </a>
       {% else %}
       <a class="btn" data-variant="outline" href="{{ url }}" target="_blank" rel="noopener noreferrer">
         Renew {% include "icons/external-link.svg" %}

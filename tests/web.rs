@@ -400,51 +400,116 @@ fn on_demand_key() -> clavium::crd::ApiKey {
     )
 }
 
-fn opened_request(name: &str, cookie: &str, csrf: &str) -> Request<Body> {
-    Request::post(format!("/keys/{name}/opened"))
-        .header(
-            header::CONTENT_TYPE,
-            "application/x-www-form-urlencoded;charset=UTF-8",
-        )
-        .header(header::COOKIE, cookie)
-        .header(header::ORIGIN, ORIGIN)
-        .body(Body::from(format!("_csrf={csrf}")))
-        .unwrap()
+fn create_request(name: &str, cookie: &str, fetch_site: Option<&str>) -> Request<Body> {
+    let mut req = Request::get(format!("/keys/{name}/create")).header(header::COOKIE, cookie);
+    if let Some(site) = fetch_site {
+        req = req.header("sec-fetch-site", site);
+    }
+    req.body(Body::empty()).unwrap()
 }
 
 #[tokio::test]
-async fn opening_an_on_demand_key_is_audited_for_any_user() {
+async fn create_link_records_then_redirects_for_any_user() {
     let h = harness(false);
     h.repo.insert(on_demand_key());
     // Viewers can open the create page too; it is their click that is recorded.
     let cookie = session_cookie(&h.key, &session(false));
 
+    // Only links followed from the app (or typed URLs) count.
     let res = h
         .app
         .clone()
-        .oneshot(opened_request("adhoc", &cookie, "wrong"))
+        .oneshot(create_request("adhoc", &cookie, Some("cross-site")))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    assert!(h.repo.get("adhoc").unwrap().status.is_none());
 
+    for site in [Some("same-origin"), None] {
+        let res = h
+            .app
+            .clone()
+            .oneshot(create_request("adhoc", &cookie, site))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            res.headers()[header::LOCATION],
+            "https://github.com/settings/personal-access-tokens/new"
+        );
+    }
+    let status = h.repo.get("adhoc").unwrap().status.clone().unwrap();
+    assert_eq!(status.last_used_by, Some(Actor::new("u1", "bob")));
+    assert_eq!(status.history.len(), 2);
+    assert_eq!(h.repo.events()[0].1.reason, "CreatePageOpened");
+
+    // Managed keys have no create link to audit.
     let res = h
         .app
         .clone()
-        .oneshot(opened_request("adhoc", &cookie, "csrf-token"))
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
-    let status = h.repo.get("adhoc").unwrap().status.clone().unwrap();
-    assert_eq!(status.last_used_by, Some(Actor::new("u1", "bob")));
-    assert_eq!(h.repo.events()[0].1.reason, "CreatePageOpened");
-
-    // Managed keys are not audited this way.
-    let res = h
-        .app
-        .oneshot(opened_request("renovate", &cookie, "csrf-token"))
+        .oneshot(create_request("renovate", &cookie, Some("same-origin")))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Without a session, log in first and come back through the audit.
+    let res = h
+        .app
+        .oneshot(
+            Request::get("/keys/adhoc/create")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        res.headers()[header::LOCATION],
+        "/auth/login?next=%2Fkeys%2Fadhoc%2Fcreate"
+    );
+}
+
+#[tokio::test]
+async fn on_demand_keys_cannot_be_recorded_directly() {
+    let h = harness(false);
+    h.repo.insert(on_demand_key());
+    let cookie = session_cookie(&h.key, &session(true));
+    let res = h
+        .app
+        .clone()
+        .oneshot(
+            Request::post("/keys/adhoc/record")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, cookie)
+                .header(header::ORIGIN, ORIGIN)
+                .body(Body::from("_csrf=csrf-token&rotated_at=2026-01-01"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Nor rotated: nothing is written anywhere.
+    let res = h
+        .app
+        .oneshot(
+            Request::post("/keys/adhoc/rotate")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, session_cookie(&h.key, &session(true)))
+                .header(header::ORIGIN, ORIGIN)
+                .header("hx-request", "true")
+                .body(Body::from("_csrf=csrf-token&key=ghp_x"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        body(res)
+            .await
+            .contains("created on demand and never stored")
+    );
+    assert!(h.repo.get("adhoc").unwrap().status.is_none());
+    assert!(h.repo.events().is_empty());
 }
 
 #[tokio::test]
@@ -458,10 +523,9 @@ async fn on_demand_keys_show_create_instead_of_rotation_actions() {
         .await
         .unwrap();
     let html = body(res).await;
-    assert!(
-        html.contains(r#"data-track-open="/keys/adhoc/opened""#),
-        "{html}"
-    );
+    assert!(html.contains(r#"href="/keys/adhoc/create""#), "{html}");
+    // The provider URL itself is never the link target.
+    assert!(!html.contains(r#"href="https://github.com/settings/personal-access-tokens/new""#));
     assert!(html.contains("Last opened"));
     assert!(!html.contains("Record rotation"));
     assert!(!html.contains(r#"data-dialog-open="rotate-dialog""#));

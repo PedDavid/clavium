@@ -60,6 +60,8 @@ pub enum RecordError {
     ExpiryBeforeRotation,
     #[error("the key was already rotated at {0}; an earlier rotation would not change anything")]
     OlderThanCurrent(Timestamp),
+    #[error("{0:?} is created on demand and never stored, so it has no rotations")]
+    OnDemand(String),
     #[error(transparent)]
     Repo(#[from] RepoError),
 }
@@ -124,6 +126,9 @@ pub async fn record(
     expires_at: Option<Timestamp>,
     now: Timestamp,
 ) -> Result<ApiKey, RecordError> {
+    if repo.get(name).is_some_and(|k| k.is_on_demand()) {
+        return Err(RecordError::OnDemand(name.to_string()));
+    }
     if rotated_at > now {
         return Err(RecordError::FutureDate);
     }
@@ -216,6 +221,8 @@ pub enum RotateError {
     Empty,
     #[error("this key has no targets; use Record rotation instead")]
     NoTargets,
+    #[error("this key is created on demand and never stored")]
+    OnDemand,
     #[error("the ApiKey spec is invalid: {0}")]
     InvalidSpec(String),
     #[error(transparent)]
@@ -290,6 +297,9 @@ impl Rotator {
             .repo
             .get(name)
             .ok_or_else(|| RotateError::NotFound(name.to_string()))?;
+        if key.is_on_demand() {
+            return Err(RotateError::OnDemand);
+        }
         if req.value.expose_secret().trim().is_empty() {
             return Err(RotateError::Empty);
         }
@@ -925,6 +935,11 @@ mod tests {
         assert!(status.last_rotated.is_none());
         assert_eq!(repo.events()[0].1.reason, "CreatePageOpened");
 
+        // An on-demand key has no rotations to record.
+        assert!(matches!(
+            record(&repo, "adhoc", &actor("alice"), now, None, now).await,
+            Err(RecordError::OnDemand(_))
+        ));
         assert!(matches!(
             record_use(&repo, "managed", &actor("alice"), now).await,
             Err(UseError::NotOnDemand(_))
