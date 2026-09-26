@@ -247,8 +247,7 @@ make check        # fmt, clippy, tests (what CI runs)
 make css          # rebuild assets/dist/app.css (Tailwind standalone CLI)
 make crd          # regenerate the CRD from the Rust types
 make helm-lint
-(cd e2e && npm ci && npx playwright test)   # browser tests against --demo
-make visual       # screenshot tests in Chromium (make visual-browsers first)
+make visual       # browser tests in Chromium (make visual-browsers first)
 
 # Against a real OpenBao:
 docker run -d -p 8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=root openbao/openbao:2.4.1
@@ -256,7 +255,7 @@ CLAVIUM_TEST_OPENBAO_ADDR=http://127.0.0.1:8200 CLAVIUM_TEST_OPENBAO_ROOT_TOKEN=
 ```
 
 The `--demo` pages are rendered at a fixed moment (`demo_app` in
-`tests/common/mod.rs`) and checked two ways:
+`tests/common/mod.rs`) and checked three ways:
 
 - **HTML snapshots** (`tests/snapshots.rs`, [insta](https://insta.rs)) run with
   `cargo test`. After an intended markup change, accept it with
@@ -270,6 +269,10 @@ The `--demo` pages are rendered at a fixed moment (`demo_app` in
   are the ones CI's `visual` job renders: when it fails, its `screenshots`
   artifact has each `-actual.png` and `-diff.png`. Running the CI workflow by
   hand with *update screenshots* ticked returns a full new set to commit.
+- **Behaviour** (`tests/palette.rs`, same harness): the ⌘K palette's ARIA
+  combobox state while moving through results, and that reopening it with a
+  search still in flight never follows a stale result. `make visual` runs
+  these and the screenshots.
 
 ## Limitations
 
