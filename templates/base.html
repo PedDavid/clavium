@@ -57,9 +57,10 @@
       <header>
         {% include "icons/search.svg" %}
         <input type="search" name="q" placeholder="Search keys…" autocomplete="off" aria-label="Search keys"
+               role="combobox" aria-autocomplete="list" aria-controls="command-results" aria-expanded="false"
                hx-get="/search" hx-trigger="input changed delay:150ms, search, palette-open" hx-target="#command-results">
       </header>
-      <div id="command-results" role="menu" aria-orientation="vertical" data-empty="No keys found."></div>
+      <div id="command-results" role="listbox" aria-label="Keys" data-empty="No keys found."></div>
     </div>
   </dialog>
 </body>
