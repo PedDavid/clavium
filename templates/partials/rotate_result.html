@@ -6,7 +6,13 @@
 </div>
 {% else if let Some(o) = outcome %}
 <div class="flex flex-col gap-3">
-  {% if o.completed %}
+  {% if let Some(err) = o.status_error %}
+  <div class="alert" data-variant="destructive" role="alert">
+    {% include "icons/triangle-alert.svg" %}
+    <h2>Written, but not recorded</h2>
+    <section>The targets below already hold the new key, but saving the rotation in the key's status failed: {{ err }}. Do not submit the key again; once the problem is fixed, use Record rotation to set the date.</section>
+  </div>
+  {% else if o.completed %}
   <div class="alert" role="status">
     {% include "icons/circle-check.svg" %}
     <h2>Key rotated</h2>
