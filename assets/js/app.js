@@ -1,6 +1,7 @@
 // Small behaviours for the server-rendered UI. No inline handlers, so the
 // page works under a strict Content-Security-Policy (script-src 'self').
 (() => {
+  const PALETTES = ['neutral', 'blue', 'green', 'orange', 'violet'];
   const root = document.documentElement;
 
   const setCookie = (name, value) => {
@@ -107,6 +108,13 @@
     if (event.target.closest('[data-theme-toggle]')) {
       const dark = root.classList.toggle('dark');
       setCookie('clavium_theme', dark ? 'dark' : 'light');
+      return;
+    }
+    if (event.target.closest('[data-palette-cycle]')) {
+      const current = PALETTES.indexOf(root.dataset.palette || 'neutral');
+      const next = PALETTES[(current + 1) % PALETTES.length];
+      root.dataset.palette = next;
+      setCookie('clavium_palette', next);
     }
   });
 
