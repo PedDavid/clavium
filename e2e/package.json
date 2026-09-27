@@ -1,0 +1,11 @@
+{
+  "name": "clavium-e2e",
+  "private": true,
+  "description": "Browser tests for the UI, run against `clavium --demo`.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

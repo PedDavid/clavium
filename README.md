@@ -51,6 +51,7 @@ cargo run -- --demo        # http://localhost:8080, sample data, no login
 ```
 
 Demo mode keeps everything in memory and treats every visitor as an admin.
+Press <kbd>⌘K</kbd> or <kbd>/</kbd> to search.
 
 ## Install
 
@@ -213,6 +214,7 @@ make check        # fmt, clippy, tests (what CI runs)
 make css          # rebuild assets/dist/app.css (Tailwind standalone CLI)
 make crd          # regenerate the CRD from the Rust types
 make helm-lint
+(cd e2e && npm ci && npx playwright test)   # browser tests against --demo
 
 # Against a real OpenBao:
 docker run -d -p 8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=root openbao/openbao:2.4.1

@@ -331,3 +331,31 @@ async fn unsafe_renew_urls_are_not_rendered_as_links() {
         assert!(!html.contains("javascript:"), "{path}");
     }
 }
+
+#[tokio::test]
+async fn search_returns_matching_keys_for_the_palette() {
+    let h = harness(true);
+    let res = h
+        .app
+        .clone()
+        .oneshot(Request::get("/search?q=renov").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = body(res).await;
+    assert!(html.contains(r#"href="/keys/renovate""#));
+    assert!(html.contains("Renovate token"));
+    // Listbox options with stable ids, for aria-activedescendant.
+    assert!(
+        html.contains(r#"role="option" id="command-option-1""#),
+        "{html}"
+    );
+    assert!(html.contains(r#"aria-selected="true""#), "{html}");
+
+    let res = h
+        .app
+        .oneshot(Request::get("/search?q=zzz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert!(!body(res).await.contains(r#"role="option""#));
+}
