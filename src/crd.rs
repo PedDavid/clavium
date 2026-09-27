@@ -27,6 +27,7 @@ const DURATION_PATTERN: &str = crate::duration::PATTERN;
     derive = "Default",
     doc = "An external API key: how it is set up, where to renew it and where it is written on rotation.",
     printcolumn = r#"{"name":"Provider","type":"string","jsonPath":".spec.provider"}"#,
+    printcolumn = r#"{"name":"Lifecycle","type":"string","jsonPath":".spec.lifecycle","priority":1}"#,
     printcolumn = r#"{"name":"Owner","type":"string","jsonPath":".spec.owner"}"#,
     printcolumn = r#"{"name":"Expires","type":"string","jsonPath":".status.expiresAt"}"#,
     printcolumn = r#"{"name":"Rotated","type":"date","jsonPath":".status.lastRotated"}"#,
@@ -41,6 +42,11 @@ pub struct ApiKeySpec {
     /// Selects the expiry probe run when a new key is submitted.
     #[serde(default)]
     pub provider: Provider,
+
+    /// `managed` keys are stored and rotated; `onDemand` keys are created
+    /// when needed and deleted right after, so they have no deadline.
+    #[serde(default)]
+    pub lifecycle: Lifecycle,
 
     /// Person or team responsible for the key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -81,6 +87,26 @@ impl Provider {
             Provider::Generic => "generic",
             Provider::Github => "github",
             Provider::Cloudflare => "cloudflare",
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Lifecycle {
+    /// Stored in targets (or tracked by hand), with an expiry or rotation policy.
+    #[default]
+    Managed,
+    /// Created for a one-off task and deleted right after: never stored,
+    /// no deadline, no alerts. Opening its create page is audited.
+    OnDemand,
+}
+
+impl Lifecycle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Lifecycle::Managed => "managed",
+            Lifecycle::OnDemand => "onDemand",
         }
     }
 }
@@ -166,6 +192,11 @@ impl TargetSpec {
 pub struct ApiKeyStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_rotated: Option<Time>,
+    /// On-demand keys: when someone last opened the create page, and who.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used: Option<Time>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_by: Option<Actor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotated_by: Option<Actor>,
     /// Effective expiry: the probed value if there is one, otherwise the manual one.
@@ -275,6 +306,8 @@ pub enum HistoryKind {
     Rotated,
     /// Dates were recorded by hand, without a key.
     Recorded,
+    /// Someone opened the create page of an on-demand key.
+    Opened,
 }
 
 impl ApiKey {
@@ -283,6 +316,10 @@ impl ApiKey {
             .display_name
             .as_deref()
             .unwrap_or_else(|| self.metadata.name.as_deref().unwrap_or_default())
+    }
+
+    pub fn is_on_demand(&self) -> bool {
+        self.spec.lifecycle == Lifecycle::OnDemand
     }
 
     pub fn name(&self) -> &str {
@@ -335,7 +372,14 @@ spec:
         )
         .unwrap();
         assert_eq!(key.spec.provider, Provider::Generic);
+        assert_eq!(key.spec.lifecycle, Lifecycle::Managed);
         assert!(key.spec.targets.is_empty());
+
+        let key: ApiKey = serde_yaml::from_str(
+            "apiVersion: clavium.prdv.cloud/v1alpha1\nkind: ApiKey\nmetadata: {name: a}\nspec: {lifecycle: onDemand}\n",
+        )
+        .unwrap();
+        assert!(key.is_on_demand());
     }
 
     #[test]

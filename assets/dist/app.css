@@ -224,6 +224,9 @@
   .pointer-events-none {
     pointer-events: none;
   }
+  .visible {
+    visibility: visible;
+  }
   .sr-only {
     position: absolute;
     width: 1px;
@@ -7149,6 +7152,7 @@
   --state-critical: oklch(0.65 0.21 35);
   --state-expired: oklch(0.58 0.22 27);
   --state-unknown: oklch(0.6 0.02 260);
+  --state-on-demand: oklch(0.62 0.13 250);
 }
 html[data-palette='blue'] {
   --primary: oklch(0.546 0.245 262.881);
@@ -7296,6 +7300,9 @@ html[data-palette='violet'].dark {
   }
   [data-state='unknown'] {
     --state: var(--state-unknown);
+  }
+  [data-state='on-demand'] {
+    --state: var(--state-on-demand);
   }
   .state-dot {
     display: inline-block;
