@@ -1,0 +1,9 @@
+apiVersion: v2
+name: clavium
+description: Inventory, expiry alerts and write-only rotation of external API keys
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/PedDavid/clavium
+sources:
+  - https://github.com/PedDavid/clavium
