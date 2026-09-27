@@ -8,7 +8,7 @@ expression: html
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false}'>
-  <title>Renovate – GitHub token · you-spin-me</title>
+  <title>Renovate – GitHub token · clavium</title>
   <link rel="stylesheet" href="/assets/dist/app.css?v=[hash]">
   <link rel="icon" href="/assets/dist/favicon.svg?v=[hash]" type="image/svg+xml">
   <script src="/assets/vendor/htmx/htmx.min.js?v=[hash]" defer></script>
@@ -36,7 +36,7 @@ expression: html
   <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
   <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
 </svg>
-        <span>you-spin-me</span>
+        <span>clavium</span>
       </a>
       <div class="ms-auto flex items-center gap-1">
         <button type="button" class="btn hidden sm:inline-flex text-muted-foreground" data-variant="outline" data-size="sm" data-palette-open aria-label="Search keys" aria-keyshortcuts="Control+K Meta+K">
