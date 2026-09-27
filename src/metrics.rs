@@ -39,7 +39,7 @@ impl Metrics {
         let probes = Family::<ProbeLabels, Counter>::default();
         registry.register(
             "clavium_rotations",
-            "Key submissions by result (ok, partial, failed, rejected)",
+            "Key submissions by result (ok, partial, failed, unrecorded, rejected, recorded)",
             rotations.clone(),
         );
         registry.register(
