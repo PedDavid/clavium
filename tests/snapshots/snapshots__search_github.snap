@@ -1,0 +1,21 @@
+---
+source: tests/snapshots.rs
+expression: html
+---
+
+<div role="group" aria-labelledby="command-keys">
+  <span role="presentation" class="command-heading" id="command-keys">Keys</span>
+  
+  <a role="option" id="command-option-1" href="/keys/renovate-github" aria-selected="true" class="active">
+    <span class="state-dot" data-state="warning"></span>
+    <span class="truncate">Renovate – GitHub token</span>
+    <span class="ms-auto" data-shortcut>Due soon · in 10d</span>
+  </a>
+  
+  <a role="option" id="command-option-2" href="/keys/github-repo-migration" aria-selected="false">
+    <span class="state-dot" data-state="on-demand"></span>
+    <span class="truncate">GitHub – repo migration (on demand)</span>
+    <span class="ms-auto" data-shortcut>On demand · used 12d ago</span>
+  </a>
+  
+</div>
