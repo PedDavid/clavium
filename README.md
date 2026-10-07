@@ -176,6 +176,14 @@ The alert rules are in
 [`files/alerts.yaml`](deploy/helm/clavium/files/alerts.yaml). They were
 checked with `promtool` and against a live Prometheus.
 
+`grafanaDashboard.enabled=true` installs the dashboard from
+[`files/dashboard.json`](deploy/helm/clavium/files/dashboard.json) as a
+ConfigMap for the Grafana sidecar:
+
+![Grafana dashboard](docs/screenshots/dashboard.png)
+
+This shows the `--demo` keys, with a week of example key submissions.
+
 ## Configuration
 
 Every flag can also be set with an environment variable; see
