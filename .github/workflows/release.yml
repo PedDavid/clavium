@@ -59,3 +59,28 @@ jobs:
           cache-to: type=gha,mode=max
       - name: The chart's default image exists
         run: docker buildx imagetools inspect "${{ steps.version.outputs.image }}:${{ steps.version.outputs.app }}"
+
+  # Publishes the chart to oci://ghcr.io/<owner>/charts/clavium. Like the
+  # image's appVersion tag, each chart version is pushed once, the first time
+  # it is seen, and never overwritten: chart changes need a version bump.
+  chart:
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: azure/setup-helm@v4
+      - run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - run: |
+          version=$(yq '.version' deploy/helm/clavium/Chart.yaml)
+          repo="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          if helm show chart "$repo/clavium" --version "$version" >/dev/null 2>&1; then
+            echo "clavium $version is already published"
+            if ! git diff --quiet HEAD^ HEAD -- deploy/helm/clavium; then
+              echo "::warning::deploy/helm/clavium changed but its version is still $version, so the change was not published"
+            fi
+            exit 0
+          fi
+          helm package deploy/helm/clavium -d dist
+          helm push "dist/clavium-$version.tgz" "$repo"
