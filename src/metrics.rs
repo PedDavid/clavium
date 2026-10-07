@@ -26,6 +26,18 @@ pub struct ProbeLabels {
     pub result: String,
 }
 
+/// Every `result` a key submission can end in. Each series is created at 0 on
+/// startup: `increase()` ignores a counter's first sample, so a series that
+/// first appears at 1 would hide the first submission after every restart.
+pub const ROTATION_RESULTS: [&str; 6] = [
+    "ok",
+    "partial",
+    "failed",
+    "unrecorded",
+    "rejected",
+    "recorded",
+];
+
 pub struct Metrics {
     registry: Registry,
     pub rotations: Family<ResultLabels, Counter>,
@@ -36,6 +48,11 @@ impl Metrics {
     pub fn new(repo: Arc<dyn Repository>, thresholds: Thresholds) -> Arc<Self> {
         let mut registry = Registry::default();
         let rotations = Family::<ResultLabels, Counter>::default();
+        for result in ROTATION_RESULTS {
+            let _ = rotations.get_or_create(&ResultLabels {
+                result: result.into(),
+            });
+        }
         let probes = Family::<ProbeLabels, Counter>::default();
         registry.register(
             "clavium_rotations",
@@ -296,6 +313,14 @@ mod tests {
             text.contains(r#"clavium_rotations_total{result="ok"} 1"#),
             "{text}"
         );
+        for result in ROTATION_RESULTS.iter().filter(|r| **r != "ok") {
+            assert!(
+                text.contains(&format!(
+                    r#"clavium_rotations_total{{result="{result}"}} 0"#
+                )),
+                "{result} not exported at 0: {text}"
+            );
+        }
         assert!(
             text.contains(r#"clavium_probe_requests_total{provider="github",result="ok"} 1"#),
             "{text}"
