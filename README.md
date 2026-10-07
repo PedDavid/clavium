@@ -70,8 +70,11 @@ the policy allows, and the app would overwrite the key there.
 
 ### 2. Helm
 
+The chart is published to GHCR as an OCI artifact:
+
 ```sh
-helm install clavium deploy/helm/clavium -n clavium --create-namespace \
+helm install clavium oci://ghcr.io/peddavid/charts/clavium --version 0.1.0 \
+  -n clavium --create-namespace \
   --set publicUrl=https://keys.example.com \
   --set oidc.issuer=https://auth.example.com/application/o/clavium/ \
   --set oidc.clientSecret.existingSecret=clavium-oidc \
@@ -86,9 +89,12 @@ The chart installs the CRD, a single-replica Deployment and a Role that can read
 The chart also mounts a ServiceAccount token with audience `openbao` for
 OpenBao's Kubernetes auth.
 
-- **Image.** It defaults to the chart's `appVersion`. The release workflow
-  publishes that tag the first time a new `appVersion` reaches `main`, and
-  `v<appVersion>` tags must match it.
+- **Versions.** The release workflow publishes each chart `version` and each
+  image `appVersion` tag the first time it reaches `main`, and never overwrites
+  either: changes to the chart or the app need a version bump to be released.
+  The image defaults to the chart's `appVersion`, and `v<appVersion>` tags must
+  match it. To install from a checkout instead, use `deploy/helm/clavium` in
+  place of the OCI reference.
 - **Services.** `service.type` applies to the UI only. Metrics and health
   checks are unauthenticated, so they always get a separate ClusterIP Service
   (`<release>-clavium-metrics`), which the ServiceMonitor selects.
