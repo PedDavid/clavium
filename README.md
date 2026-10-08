@@ -282,7 +282,8 @@ The `--demo` pages are rendered at a fixed moment (`demo_app` in
   own Node.js. Fonts and antialiasing vary between machines, so the baselines
   are the ones CI's `visual` job renders: when it fails, its `screenshots`
   artifact has each `-actual.png` and `-diff.png`. Running the CI workflow by
-  hand with *update screenshots* ticked returns a full new set to commit.
+  hand on a branch with *update screenshots* ticked renders a full new set and
+  commits it to that branch (untick *commit screenshots* to only get the artifact).
 - **Behaviour** (`tests/palette.rs`, same harness): the ⌘K palette's ARIA
   combobox state while moving through results, and that reopening it with a
   search still in flight never follows a stale result. `make visual` runs
