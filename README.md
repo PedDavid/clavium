@@ -36,7 +36,7 @@ git (ApiKey YAML) ──Argo CD / Flux──▶ ApiKey CRs ◀──watch / writ
   `lastRotated + maxAge`. Keys that never expire still get a deadline from the
   rotation policy.
 - **Rotation.** Open the renew link, create the key, paste it into the rotate
-  dialog. The app can check it with the provider (GitHub, Cloudflare), which
+  dialog. The app can check it with the provider (GitHub, GitLab, Cloudflare), which
   also detects the expiry. It then writes the key to every target, records the
   rotation, and lists what is left to do by hand.
 - **Alerts.** Warning at 14 days, critical at 5 days (both overridable per key),
@@ -115,7 +115,7 @@ metadata:
   namespace: clavium
 spec:
   displayName: Renovate – GitHub token
-  provider: github             # github | cloudflare | generic (no probe)
+  provider: github             # github | gitlab | cloudflare | generic (no probe)
   owner: david
   renewUrl: https://github.com/settings/personal-access-tokens
   setup:

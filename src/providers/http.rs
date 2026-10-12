@@ -1,10 +1,10 @@
-//! Probes for GitHub and Cloudflare. Provider hosts are fixed here, never
+//! Probes for GitHub, GitLab and Cloudflare. Provider hosts are fixed here, never
 //! taken from an `ApiKey`, so a spec cannot send a key somewhere else.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
-use jiff::Timestamp;
+use jiff::{Timestamp, civil};
 use reqwest::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -14,22 +14,28 @@ use super::{ProbeError, ProbeResult, Prober};
 use crate::crd::Provider;
 
 const GITHUB_API: &str = "https://api.github.com/";
+const GITLAB_API: &str = "https://gitlab.com/api/v4/";
 const CLOUDFLARE_API: &str = "https://api.cloudflare.com/client/v4/";
 const EXPIRATION_HEADER: &str = "github-authentication-token-expiration";
 
 pub struct HttpProber {
     http: reqwest::Client,
     github: Url,
+    gitlab: Url,
     cloudflare: Url,
 }
 
 impl HttpProber {
     pub fn new() -> anyhow::Result<Self> {
-        HttpProber::with_endpoints(GITHUB_API.parse()?, CLOUDFLARE_API.parse()?)
+        HttpProber::with_endpoints(
+            GITHUB_API.parse()?,
+            GITLAB_API.parse()?,
+            CLOUDFLARE_API.parse()?,
+        )
     }
 
     /// Custom endpoints, for tests.
-    pub fn with_endpoints(github: Url, cloudflare: Url) -> anyhow::Result<Self> {
+    pub fn with_endpoints(github: Url, gitlab: Url, cloudflare: Url) -> anyhow::Result<Self> {
         Ok(HttpProber {
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
@@ -37,6 +43,7 @@ impl HttpProber {
                 .user_agent(concat!("clavium/", env!("CARGO_PKG_VERSION")))
                 .build()?,
             github,
+            gitlab,
             cloudflare,
         })
     }
@@ -82,6 +89,89 @@ impl HttpProber {
             )),
             s => Err(ProbeError::Unavailable(format!("GitHub returned {s}"))),
         }
+    }
+
+    async fn gitlab(&self, key: &SecretString) -> Result<ProbeResult, ProbeError> {
+        #[derive(Deserialize)]
+        struct Token {
+            id: Option<u64>,
+            #[serde(default = "yes")]
+            active: bool,
+            #[serde(default)]
+            revoked: bool,
+            expires_at: Option<civil::Date>,
+        }
+        #[derive(Deserialize)]
+        struct User {
+            username: String,
+        }
+        fn yes() -> bool {
+            true
+        }
+        let res = self
+            .http
+            .get(
+                self.gitlab
+                    .join("personal_access_tokens/self")
+                    .expect("static path"),
+            )
+            .header("PRIVATE-TOKEN", key.expose_secret())
+            .send()
+            .await
+            .map_err(|e| ProbeError::Unavailable(e.without_url().to_string()))?;
+        match res.status() {
+            StatusCode::OK => {}
+            StatusCode::UNAUTHORIZED => {
+                return Err(ProbeError::Rejected(
+                    "GitLab returned 401 Unauthorized".into(),
+                ));
+            }
+            s => return Err(ProbeError::Unavailable(format!("GitLab returned {s}"))),
+        }
+        let token: Token = res
+            .json()
+            .await
+            .map_err(|e| ProbeError::Unavailable(format!("GitLab response: {e}")))?;
+        if token.revoked {
+            return Err(ProbeError::Rejected(
+                "GitLab reports the token as revoked".into(),
+            ));
+        }
+        if !token.active {
+            return Err(ProbeError::Rejected(
+                "GitLab reports the token as inactive".into(),
+            ));
+        }
+        // GitLab treats `expires_at` as the end of that day in UTC.
+        let expires_at = token
+            .expires_at
+            .and_then(|d| d.at(23, 59, 59, 0).to_zoned(jiff::tz::TimeZone::UTC).ok())
+            .map(|z| z.timestamp());
+        let fallback = token.id.map(|id| format!("token {id}"));
+        // The username needs `read_user` or `api`; without it, fall back to
+        // the token id rather than failing the probe.
+        let user = self
+            .http
+            .get(self.gitlab.join("user").expect("static path"))
+            .header("PRIVATE-TOKEN", key.expose_secret())
+            .send()
+            .await
+            .map_err(|e| ProbeError::Unavailable(e.without_url().to_string()))?;
+        let identity = match user.status() {
+            StatusCode::OK => {
+                let u: User = user
+                    .json()
+                    .await
+                    .map_err(|e| ProbeError::Unavailable(format!("GitLab response: {e}")))?;
+                Some(u.username)
+            }
+            StatusCode::FORBIDDEN => fallback,
+            s => return Err(ProbeError::Unavailable(format!("GitLab returned {s}"))),
+        };
+        Ok(ProbeResult {
+            expires_at,
+            identity,
+        })
     }
 
     async fn cloudflare(&self, key: &SecretString) -> Result<ProbeResult, ProbeError> {
@@ -171,6 +261,7 @@ impl Prober for HttpProber {
         match provider {
             Provider::Generic => Ok(None),
             Provider::Github => self.github(key).await.map(Some),
+            Provider::Gitlab => self.gitlab(key).await.map(Some),
             Provider::Cloudflare => self.cloudflare(key).await.map(Some),
         }
     }
@@ -187,6 +278,7 @@ mod tests {
         let base: Url = format!("{}/", server.uri()).parse().unwrap();
         HttpProber::with_endpoints(
             base.join("gh/").unwrap(),
+            base.join("gl/api/v4/").unwrap(),
             base.join("cf/client/v4/").unwrap(),
         )
         .unwrap()
@@ -288,6 +380,112 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ProbeError::Rejected(_)));
+    }
+
+    fn gitlab_self(body: serde_json::Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(body)
+    }
+
+    #[tokio::test]
+    async fn gitlab_reports_username_and_expiry() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/gl/api/v4/personal_access_tokens/self"))
+            .and(header("PRIVATE-TOKEN", "glpat-x"))
+            .respond_with(gitlab_self(json!({
+                "id": 123, "revoked": false, "active": true,
+                "scopes": ["api", "read_user"], "expires_at": "2027-01-15"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/gl/api/v4/user"))
+            .and(header("PRIVATE-TOKEN", "glpat-x"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"username": "tanuki"})))
+            .mount(&server)
+            .await;
+        let r = prober(&server)
+            .await
+            .probe(Provider::Gitlab, &SecretString::from("glpat-x"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.identity.as_deref(), Some("tanuki"));
+        assert_eq!(r.expires_at.unwrap().to_string(), "2027-01-15T23:59:59Z");
+    }
+
+    #[tokio::test]
+    async fn gitlab_without_expiry_and_user_refused_uses_token_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/gl/api/v4/personal_access_tokens/self"))
+            .respond_with(gitlab_self(
+                json!({"id": 7, "revoked": false, "active": true, "expires_at": null}),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/gl/api/v4/user"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        let r = prober(&server)
+            .await
+            .probe(Provider::Gitlab, &SecretString::from("x"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.expires_at, None);
+        assert_eq!(r.identity.as_deref(), Some("token 7"));
+    }
+
+    #[tokio::test]
+    async fn gitlab_rejects_401_revoked_and_inactive() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header("PRIVATE-TOKEN", "bad"))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(json!({"message": "401 Unauthorized"})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(header("PRIVATE-TOKEN", "revoked"))
+            .respond_with(gitlab_self(
+                json!({"id": 1, "revoked": true, "active": false}),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(header("PRIVATE-TOKEN", "inactive"))
+            .respond_with(gitlab_self(
+                json!({"id": 2, "revoked": false, "active": false}),
+            ))
+            .mount(&server)
+            .await;
+        let p = prober(&server).await;
+        for k in ["bad", "revoked", "inactive"] {
+            let err = p
+                .probe(Provider::Gitlab, &SecretString::from(k))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, ProbeError::Rejected(_)), "{k}: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn gitlab_server_error_is_unavailable() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let err = prober(&server)
+            .await
+            .probe(Provider::Gitlab, &SecretString::from("x"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ProbeError::Unavailable(_)), "{err}");
     }
 
     #[tokio::test]
