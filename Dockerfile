@@ -10,6 +10,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /clavium /usr/local/bin/clavium
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 8080 9090
 ENTRYPOINT ["/usr/local/bin/clavium"]
