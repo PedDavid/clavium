@@ -79,6 +79,15 @@ grafanaDashboard:
   labels:
     grafana_dashboard: "1"
 
+# Numeric IDs are required: with runAsNonRoot the kubelet cannot verify a
+# non-numeric image USER. 65532 is distroless's `nonroot`.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
 resources:
   requests:
     cpu: 10m
