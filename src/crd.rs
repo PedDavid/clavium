@@ -78,6 +78,7 @@ pub enum Provider {
     #[default]
     Generic,
     Github,
+    Gitlab,
     Cloudflare,
 }
 
@@ -86,6 +87,7 @@ impl Provider {
         match self {
             Provider::Generic => "generic",
             Provider::Github => "github",
+            Provider::Gitlab => "gitlab",
             Provider::Cloudflare => "cloudflare",
         }
     }

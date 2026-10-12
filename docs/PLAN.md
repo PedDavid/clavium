@@ -225,6 +225,10 @@ pub struct ProbeResult {
   - `generic`: no probe; the admin enters the expiry by hand (optional).
   - `github`: `GET /user`, reading the `github-authentication-token-expiration`
     response header for PATs, and the login name as identity.
+  - `gitlab`: `GET /api/v4/personal_access_tokens/self` (GitLab 15.5+) for
+    validity and `expires_at` (a date, taken as the end of that day in UTC, or
+    null), and `GET /api/v4/user` for the username, falling back to `token <id>`
+    on 403. Only gitlab.com; self-managed hosts are not supported.
   - `cloudflare`: `GET /client/v4/user/tokens/verify`, reading the status and
     expiry of the token.
 - Probes only call a fixed list of provider hosts. The host is never taken from

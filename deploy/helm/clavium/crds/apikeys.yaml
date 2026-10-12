@@ -66,6 +66,7 @@ spec:
                 description: Selects the expiry probe run when a new key is submitted.
                 enum:
                 - github
+                - gitlab
                 - cloudflare
                 - generic
                 type: string
