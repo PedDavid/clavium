@@ -102,7 +102,10 @@ OpenBao's Kubernetes auth.
 OIDC: register a confidential client with redirect URI
 `<publicUrl>/auth/callback`. Admins are users whose ID token claim `groups`
 contains `clavium-admins` (see `oidc.adminClaim` / `oidc.adminValue`;
-dotted paths such as `realm_access.roles` work). Everyone else who can log in
+dotted paths such as `realm_access.roles` work). The claim is looked up in the
+ID token, then the userinfo endpoint, then the access token (if it is a JWT),
+so Keycloak client roles (`resource_access.<client>.roles`) work without an
+extra mapper. Everyone else who can log in
 gets read-only access.
 
 ### 3. Keys
