@@ -15,12 +15,12 @@ use openidconnect::core::{
 };
 use openidconnect::{
     AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
-    TokenResponse,
+    EndpointSet, IssuerUrl, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier,
+    RedirectUrl, Scope, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::{AppError, AppState};
 use crate::config::AuthConfig;
@@ -127,6 +127,8 @@ pub struct Oidc {
     admin_value: String,
     http: reqwest::Client,
     client: OnceCell<OidcClient>,
+    /// The discovered `userinfo_endpoint`, if the provider has one.
+    userinfo_url: std::sync::OnceLock<Option<String>>,
 }
 
 impl AuthMode {
@@ -179,6 +181,7 @@ impl AuthMode {
             admin_value: cfg.admin_value.clone(),
             http,
             client: OnceCell::new(),
+            userinfo_url: std::sync::OnceLock::new(),
         })))
     }
 }
@@ -210,6 +213,27 @@ async fn http_call(
 }
 
 impl Oidc {
+    /// The claims the userinfo endpoint returns for this access token, if the
+    /// provider has one and it answers with plain JSON.
+    async fn userinfo_claims(&self, access_token: &str) -> Option<serde_json::Value> {
+        let url = self.userinfo_url.get()?.as_deref()?;
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(access_token)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .and_then(|r| r.error_for_status());
+        match response {
+            Ok(r) => r.json().await.ok(),
+            Err(e) => {
+                warn!(error = %e, "userinfo request failed");
+                None
+            }
+        }
+    }
+
     async fn client(&self) -> Result<&OidcClient, AppError> {
         self.client
             .get_or_try_init(|| async {
@@ -220,6 +244,9 @@ impl Oidc {
                 .await
                 .map_err(|e| AppError::Upstream(format!("OIDC discovery failed: {e}")))?;
                 info!(issuer = %self.issuer.as_str(), "OIDC provider discovered");
+                let _ = self
+                    .userinfo_url
+                    .set(metadata.userinfo_endpoint().map(|u| u.url().to_string()));
                 Ok(CoreClient::from_provider_metadata(
                     metadata,
                     self.client_id.clone(),
@@ -412,7 +439,31 @@ pub async fn callback(
     // The signature was verified above, so reading extra claims from the
     // payload directly is safe.
     let raw_claims = decode_jwt_payload(&id_token.to_string()).unwrap_or_default();
-    let admin = claim_contains(&raw_claims, &oidc.admin_claim, &oidc.admin_value);
+    let mut admin_source =
+        claim_contains(&raw_claims, &oidc.admin_claim, &oidc.admin_value).then_some("ID token");
+    // Keycloak puts client roles only in the access token and userinfo by
+    // default, so look there too. The access token is not verified: it came
+    // in the same TLS response as the verified ID token, so no new party is
+    // trusted. An opaque (non-JWT) access token is skipped.
+    let access_token = token.access_token().secret();
+    if admin_source.is_none()
+        && let Some(userinfo) = oidc.userinfo_claims(access_token).await
+        && claim_contains(&userinfo, &oidc.admin_claim, &oidc.admin_value)
+    {
+        admin_source = Some("userinfo");
+    }
+    if admin_source.is_none()
+        && let Some(payload) = decode_jwt_payload(access_token)
+        && claim_contains(&payload, &oidc.admin_claim, &oidc.admin_value)
+    {
+        admin_source = Some("access token");
+    }
+    let admin = admin_source.is_some();
+    debug!(
+        claim = %oidc.admin_claim,
+        source = admin_source.unwrap_or("none"),
+        "admin claim lookup"
+    );
     let name = claims
         .preferred_username()
         .map(|u| u.to_string())
@@ -590,6 +641,21 @@ impl FromRequestParts<AppState> for Admin {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn keycloak_client_roles_are_found_in_a_jwt_payload() {
+        let payload = URL_SAFE_NO_PAD
+            .encode(json!({"resource_access": {"clavium": {"roles": ["admin"]}}}).to_string());
+        let jwt = format!("e30.{payload}.sig");
+        let claims = decode_jwt_payload(&jwt).unwrap();
+        assert!(claim_contains(
+            &claims,
+            "resource_access.clavium.roles",
+            "admin"
+        ));
+        // An opaque access token is not a JWT and is skipped.
+        assert!(decode_jwt_payload("opaque-token").is_none());
+    }
 
     #[test]
     fn claims_are_matched_by_path() {
