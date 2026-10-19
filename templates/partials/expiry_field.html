@@ -1,0 +1,30 @@
+{# Expiry selector shared by the rotate and record dialogs.
+   Expects: expiry_id (id of the date input), expiry_default ("match" or "never"),
+   expiry_base (id of a date input the relative choices count from, or "" for today).
+   Without JavaScript only the date input shows; app.js reveals the rest and
+   writes the resolved date into that input, which is what the server reads. #}
+<div class="field" data-expiry data-today="{{ today }}" data-max-age="{{ key.max_age }}" data-default="{{ expiry_default }}" data-base="{{ expiry_base }}">
+  <label for="{{ expiry_id }}">Expires <span class="text-muted-foreground">(optional)</span></label>
+  <div class="flex flex-col gap-2">
+  <div hidden class="flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-muted p-0.5" data-expiry-modes role="group" aria-label="Expiry">
+    <button type="button" data-mode="match" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">Match rotation</button>
+    <button type="button" data-mode="in" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">In…</button>
+    <button type="button" data-mode="on" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">On date</button>
+    <button type="button" data-mode="never" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">Never</button>
+  </div>
+  <div hidden class="flex flex-wrap gap-1.5" data-expiry-presets role="group" aria-label="Expires in">
+    <button type="button" data-n="30" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">30d</button>
+    <button type="button" data-n="60" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">60d</button>
+    <button type="button" data-n="90" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">90d</button>
+    <button type="button" data-n="6" data-unit="mo" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">6 months</button>
+    <button type="button" data-n="1" data-unit="y" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">1 year</button>
+    <button type="button" data-custom aria-pressed="false" class="h-8 cursor-pointer rounded-full border border-dashed px-3 text-sm hover:bg-muted aria-pressed:border-solid aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">Custom…</button>
+  </div>
+  <div hidden data-expiry-custom>
+    <input type="text" class="input w-full" placeholder="e.g. 45d, 10w, 8mo, 2y" autocomplete="off" spellcheck="false" aria-label="Custom duration" aria-describedby="{{ expiry_id }}-custom-hint">
+    <p id="{{ expiry_id }}-custom-hint" class="mt-1 text-sm text-muted-foreground">Days, weeks, months or years: 45d, 10w, 8mo, 2y.</p>
+  </div>
+  <input id="{{ expiry_id }}" class="input" type="date" name="expires_at" {% if expiry_base.is_empty() %}min="{{ today }}"{% endif %}>
+  <p hidden class="flex items-baseline gap-2 text-sm text-foreground" data-expiry-result aria-live="polite"></p>
+  </div>
+</div>
