@@ -118,6 +118,141 @@
     }
   });
 
+  // --- Expiry selector ---
+  // Resolves "match rotation", "in 90d", a custom duration or a picked date
+  // into the plain date input the server reads (`expires_at`).
+  const SECONDS = { s: 1, m: 60, h: 3600, d: 86400, w: 604800 };
+  const pad = (n) => String(n).padStart(2, '0');
+  const isoDate = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const parseIso = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : null);
+
+  // Months and years clamp to the end of a shorter month (Jan 31 + 1 month = Feb 28).
+  const addToDate = (base, n, unit) => {
+    const d = new Date(base);
+    if (unit === 'd') d.setUTCDate(d.getUTCDate() + n);
+    else if (unit === 'w') d.setUTCDate(d.getUTCDate() + 7 * n);
+    else {
+      const day = d.getUTCDate();
+      d.setUTCDate(1);
+      if (unit === 'mo') d.setUTCMonth(d.getUTCMonth() + n);
+      else d.setUTCFullYear(d.getUTCFullYear() + n);
+      const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(day, last));
+    }
+    return d;
+  };
+
+  // The same <n><unit> grammar as maxAge, plus mo and y; null when invalid.
+  const parseCustom = (text) => {
+    const m = /^(\d{1,5})\s*(d|w|mo|y)$/.exec(text.trim().toLowerCase());
+    return m ? { n: Number(m[1]), unit: m[2] } : null;
+  };
+
+  const setupExpiry = (root) => {
+    const modes = root.querySelector('[data-expiry-modes]');
+    const presets = root.querySelector('[data-expiry-presets]');
+    const customBox = root.querySelector('[data-expiry-custom]');
+    const custom = customBox.querySelector('input');
+    const dateInput = root.querySelector('input[type="date"]');
+    const result = root.querySelector('[data-expiry-result]');
+    const baseInput = root.dataset.base ? document.getElementById(root.dataset.base) : null;
+    const maxAge = /^(\d{1,5})([smhdw])$/.exec(root.dataset.maxAge || '');
+    const customChip = presets.querySelector('[data-custom]');
+    const presetChips = Array.from(presets.querySelectorAll('[data-n]'));
+
+    let mode = root.dataset.default === 'match' && maxAge ? 'match' : 'never';
+    let chip = presetChips.find((c) => c.dataset.n === '90') ?? presetChips[0];
+
+    const base = () => parseIso(baseInput?.value ?? '') ?? parseIso(root.dataset.today) ?? new Date();
+    const describe = (text, ok) => {
+      result.replaceChildren();
+      if (ok) {
+        const check = document.createElement('span');
+        check.className = 'text-(--state-ok)';
+        check.setAttribute('aria-hidden', 'true');
+        check.textContent = '✓';
+        const label = document.createElement('span');
+        label.append('Expires on ');
+        const date = document.createElement('b');
+        date.className = 'font-mono font-medium';
+        date.textContent = ok;
+        label.append(date);
+        result.append(check, label);
+        if (text) {
+          const extra = document.createElement('span');
+          extra.className = 'text-muted-foreground';
+          extra.textContent = text;
+          result.append(extra);
+        }
+      } else {
+        const note = document.createElement('span');
+        note.className = 'text-muted-foreground';
+        note.textContent = text;
+        result.append(note);
+      }
+    };
+
+    const render = () => {
+      modes.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+      presets.hidden = mode !== 'in';
+      presetChips.forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
+      customChip.setAttribute('aria-pressed', String(chip === customChip));
+      customBox.hidden = !(mode === 'in' && chip === customChip);
+      dateInput.hidden = mode !== 'on';
+      custom.setCustomValidity('');
+
+      let resolved = null;
+      let extra = '';
+      let message = '';
+      if (mode === 'match') {
+        resolved = addToDate(base(), Math.ceil((Number(maxAge[1]) * SECONDS[maxAge[2]]) / 86400), 'd');
+        extra = `· rotation policy max age ${maxAge[1]}${maxAge[2]}`;
+      } else if (mode === 'in' && chip !== customChip) {
+        resolved = addToDate(base(), Number(chip.dataset.n), chip.dataset.unit);
+      } else if (mode === 'in') {
+        const parsed = parseCustom(custom.value);
+        if (parsed) resolved = addToDate(base(), parsed.n, parsed.unit);
+        else {
+          message = custom.value.trim() ? 'Not understood. Try 45d, 10w, 8mo or 2y.' : 'Type a duration above.';
+          custom.setCustomValidity(message);
+        }
+      } else if (mode === 'on') {
+        resolved = parseIso(dateInput.value);
+        if (!resolved) message = 'Pick a date.';
+      } else {
+        message = 'No expiry. The rotation policy still applies.';
+      }
+
+      if (mode !== 'on') dateInput.value = resolved ? isoDate(resolved) : '';
+      result.hidden = false;
+      describe(message || extra, resolved ? isoDate(resolved) : '');
+    };
+
+    modes.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-mode]');
+      if (!button) return;
+      // Carry the current result into the date picker so it can be adjusted.
+      mode = button.dataset.mode;
+      render();
+    });
+    presets.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      chip = button.hasAttribute('data-custom') ? customChip : button;
+      render();
+      if (chip === customChip) custom.focus();
+    });
+    custom.addEventListener('input', render);
+    dateInput.addEventListener('input', render);
+    baseInput?.addEventListener('input', render);
+
+    if (!maxAge) modes.querySelector('[data-mode="match"]').remove();
+    modes.hidden = false;
+    render();
+  };
+
+  document.querySelectorAll('[data-expiry]').forEach(setupExpiry);
+
   // After a successful rotation, clear the key from the form.
   document.addEventListener('rotation-complete', (event) => {
     event.target.closest('form')?.querySelectorAll('input[name="key"]').forEach((i) => { i.value = ''; });

@@ -209,11 +209,9 @@
         <label for="new-key">New key</label>
         <input id="new-key" type="password" name="key" required autocomplete="off" spellcheck="false" data-1p-ignore data-lpignore="true">
       </div>
-      <div class="field">
-        <label for="rotate-expires">Expires on <span class="text-muted-foreground">(optional)</span></label>
-        <input id="rotate-expires" type="date" name="expires_at" min="{{ today }}">
-        {% if probe_supported %}<p>Detected from {{ key.row.provider }} when possible.</p>{% endif %}
-      </div>
+      {% let expiry_id = "rotate-expires" %}{% let expiry_default = "match" %}{% let expiry_base = "" %}
+      {% include "partials/expiry_field.html" %}
+      {% if probe_supported %}<p class="-mt-2 text-sm text-muted-foreground">The expiry is detected from {{ key.row.provider }} when possible, and replaces the choice above.</p>{% endif %}
       {% if probe_supported %}
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" class="input" name="skip_verification" value="1">
@@ -242,11 +240,8 @@
         <label for="rotated_at">Rotated on</label>
         <input id="rotated_at" type="date" name="rotated_at" value="{{ today }}" max="{{ today }}" required>
       </div>
-      <div class="field">
-        <label for="expires_at">Expires on <span class="text-muted-foreground">(optional)</span></label>
-        <input id="expires_at" type="date" name="expires_at">
-        <p>Leave empty if the key does not expire; the rotation policy still applies.</p>
-      </div>
+      {% let expiry_id = "expires_at" %}{% let expiry_default = "never" %}{% let expiry_base = "rotated_at" %}
+      {% include "partials/expiry_field.html" %}
     </section>
     <footer>
       <button type="button" class="btn" data-variant="outline" data-dialog-close>Cancel</button>

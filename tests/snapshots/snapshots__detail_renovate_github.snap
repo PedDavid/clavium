@@ -379,11 +379,34 @@ expression: html
         <label for="new-key">New key</label>
         <input id="new-key" type="password" name="key" required autocomplete="off" spellcheck="false" data-1p-ignore data-lpignore="true">
       </div>
-      <div class="field">
-        <label for="rotate-expires">Expires on <span class="text-muted-foreground">(optional)</span></label>
-        <input id="rotate-expires" type="date" name="expires_at" min="2026-09-26">
-        <p>Detected from github when possible.</p>
-      </div>
+      
+      
+<div class="field" data-expiry data-today="2026-09-26" data-max-age="90d" data-default="match" data-base="">
+  <label for="rotate-expires">Expires <span class="text-muted-foreground">(optional)</span></label>
+  <div class="flex flex-col gap-2">
+  <div hidden class="flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-muted p-0.5" data-expiry-modes role="group" aria-label="Expiry">
+    <button type="button" data-mode="match" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">Match rotation</button>
+    <button type="button" data-mode="in" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">In…</button>
+    <button type="button" data-mode="on" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">On date</button>
+    <button type="button" data-mode="never" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">Never</button>
+  </div>
+  <div hidden class="flex flex-wrap gap-1.5" data-expiry-presets role="group" aria-label="Expires in">
+    <button type="button" data-n="30" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">30d</button>
+    <button type="button" data-n="60" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">60d</button>
+    <button type="button" data-n="90" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">90d</button>
+    <button type="button" data-n="6" data-unit="mo" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">6 months</button>
+    <button type="button" data-n="1" data-unit="y" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">1 year</button>
+    <button type="button" data-custom aria-pressed="false" class="h-8 cursor-pointer rounded-full border border-dashed px-3 text-sm hover:bg-muted aria-pressed:border-solid aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">Custom…</button>
+  </div>
+  <div hidden data-expiry-custom>
+    <input type="text" class="input w-full" placeholder="e.g. 45d, 10w, 8mo, 2y" autocomplete="off" spellcheck="false" aria-label="Custom duration" aria-describedby="rotate-expires-custom-hint">
+    <p id="rotate-expires-custom-hint" class="mt-1 text-sm text-muted-foreground">Days, weeks, months or years: 45d, 10w, 8mo, 2y.</p>
+  </div>
+  <input id="rotate-expires" class="input" type="date" name="expires_at" min="2026-09-26">
+  <p hidden class="flex items-baseline gap-2 text-sm text-foreground" data-expiry-result aria-live="polite"></p>
+  </div>
+</div>
+      <p class="-mt-2 text-sm text-muted-foreground">The expiry is detected from github when possible, and replaces the choice above.</p>
       
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" class="input" name="skip_verification" value="1">
@@ -440,11 +463,33 @@ expression: html
         <label for="rotated_at">Rotated on</label>
         <input id="rotated_at" type="date" name="rotated_at" value="2026-09-26" max="2026-09-26" required>
       </div>
-      <div class="field">
-        <label for="expires_at">Expires on <span class="text-muted-foreground">(optional)</span></label>
-        <input id="expires_at" type="date" name="expires_at">
-        <p>Leave empty if the key does not expire; the rotation policy still applies.</p>
-      </div>
+      
+      
+<div class="field" data-expiry data-today="2026-09-26" data-max-age="90d" data-default="never" data-base="rotated_at">
+  <label for="expires_at">Expires <span class="text-muted-foreground">(optional)</span></label>
+  <div class="flex flex-col gap-2">
+  <div hidden class="flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-muted p-0.5" data-expiry-modes role="group" aria-label="Expiry">
+    <button type="button" data-mode="match" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">Match rotation</button>
+    <button type="button" data-mode="in" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">In…</button>
+    <button type="button" data-mode="on" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">On date</button>
+    <button type="button" data-mode="never" aria-pressed="false" class="h-7 cursor-pointer rounded-md px-3 text-sm text-muted-foreground hover:text-foreground aria-pressed:bg-background aria-pressed:font-medium aria-pressed:text-foreground aria-pressed:shadow-sm">Never</button>
+  </div>
+  <div hidden class="flex flex-wrap gap-1.5" data-expiry-presets role="group" aria-label="Expires in">
+    <button type="button" data-n="30" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">30d</button>
+    <button type="button" data-n="60" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">60d</button>
+    <button type="button" data-n="90" data-unit="d" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">90d</button>
+    <button type="button" data-n="6" data-unit="mo" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">6 months</button>
+    <button type="button" data-n="1" data-unit="y" aria-pressed="false" class="h-8 cursor-pointer rounded-full border px-3 text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">1 year</button>
+    <button type="button" data-custom aria-pressed="false" class="h-8 cursor-pointer rounded-full border border-dashed px-3 text-sm hover:bg-muted aria-pressed:border-solid aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground">Custom…</button>
+  </div>
+  <div hidden data-expiry-custom>
+    <input type="text" class="input w-full" placeholder="e.g. 45d, 10w, 8mo, 2y" autocomplete="off" spellcheck="false" aria-label="Custom duration" aria-describedby="expires_at-custom-hint">
+    <p id="expires_at-custom-hint" class="mt-1 text-sm text-muted-foreground">Days, weeks, months or years: 45d, 10w, 8mo, 2y.</p>
+  </div>
+  <input id="expires_at" class="input" type="date" name="expires_at" >
+  <p hidden class="flex items-baseline gap-2 text-sm text-foreground" data-expiry-result aria-live="polite"></p>
+  </div>
+</div>
     </section>
     <footer>
       <button type="button" class="btn" data-variant="outline" data-dialog-close>Cancel</button>

@@ -543,3 +543,23 @@ async fn on_demand_keys_show_create_instead_of_rotation_actions() {
     assert!(html.contains("never stored"));
     assert!(!html.contains("Renovate token"));
 }
+
+#[tokio::test]
+async fn rotate_and_record_dialogs_offer_the_expiry_selector() {
+    let res = demo_app()
+        .oneshot(
+            Request::get("/keys/renovate-github")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let html = body(res).await;
+    // One selector per dialog, each carrying the key's max age and still
+    // posting a plain `expires_at` date.
+    assert_eq!(html.matches("data-expiry ").count(), 2, "{html}");
+    assert_eq!(html.matches(r#"data-max-age="90d""#).count(), 2);
+    assert!(html.contains(r#"data-default="match""#));
+    assert!(html.contains(r#"data-base="rotated_at""#));
+    assert_eq!(html.matches(r#"name="expires_at""#).count(), 2);
+}
